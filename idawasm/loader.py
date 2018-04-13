@@ -1,10 +1,26 @@
-import idc
-import idaapi
-
 import struct
 
 import wasm
 import wasm.decode
+import wasm.wasmtypes
+
+import idc
+import idaapi
+
+
+SECTION_NAMES = {
+    wasm.wasmtypes.SEC_TYPE: "types",
+    wasm.wasmtypes.SEC_IMPORT: "imports",
+    wasm.wasmtypes.SEC_FUNCTION: "functions",
+    wasm.wasmtypes.SEC_TABLE: "tables",
+    wasm.wasmtypes.SEC_MEMORY: "memory",
+    wasm.wasmtypes.SEC_GLOBAL: "globals",
+    wasm.wasmtypes.SEC_EXPORT: "exports",
+    wasm.wasmtypes.SEC_START: "starts",
+    wasm.wasmtypes.SEC_ELEMENT: "elements",
+    wasm.wasmtypes.SEC_CODE: "code",
+    wasm.wasmtypes.SEC_DATA: "data",
+}
 
 
 def accept_file(f, n):
@@ -33,8 +49,17 @@ def load_file(f, neflags, format):
     p = 0
     sections = wasm.decode.decode_module(buf)
     for i, section in enumerate(sections):
+        if i == 0:
+            sname = 'header'
+        else:
+            if section.data.id == 0:
+                # fetch custom name
+                sname = ''
+            else:
+                sname = SECTION_NAMES.get(section.data.id, 'unknown')
+
         slen = sum(section.data.get_decoder_meta()['lengths'].values())
-        idaapi.add_segm(0, p, p + slen, str(i), "DATA")
+        idaapi.add_segm(0, p, p + slen, sname, "DATA")
         p += slen
 
     # magic
