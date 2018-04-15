@@ -51,15 +51,18 @@ def load_file(f, neflags, format):
     for i, section in enumerate(sections):
         if i == 0:
             sname = 'header'
+            stype = 'DATA'
         else:
             if section.data.id == 0:
                 # fetch custom name
                 sname = ''
+                stype = 'DATA'
             else:
                 sname = SECTION_NAMES.get(section.data.id, 'unknown')
+                stype = 'CODE'
 
         slen = sum(section.data.get_decoder_meta()['lengths'].values())
-        idaapi.add_segm(0, p, p + slen, sname, "DATA")
+        idaapi.add_segm(0, p, p + slen, sname, stype)
         p += slen
 
     # magic
