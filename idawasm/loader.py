@@ -9,29 +9,29 @@ import idaapi
 
 
 SECTION_NAMES = {
-    wasm.wasmtypes.SEC_TYPE: "types",
-    wasm.wasmtypes.SEC_IMPORT: "imports",
-    wasm.wasmtypes.SEC_FUNCTION: "functions",
-    wasm.wasmtypes.SEC_TABLE: "tables",
-    wasm.wasmtypes.SEC_MEMORY: "memory",
-    wasm.wasmtypes.SEC_GLOBAL: "globals",
-    wasm.wasmtypes.SEC_EXPORT: "exports",
-    wasm.wasmtypes.SEC_START: "starts",
-    wasm.wasmtypes.SEC_ELEMENT: "elements",
-    wasm.wasmtypes.SEC_CODE: "code",
-    wasm.wasmtypes.SEC_DATA: "data",
+    wasm.wasmtypes.SEC_TYPE: 'types',
+    wasm.wasmtypes.SEC_IMPORT: 'imports',
+    wasm.wasmtypes.SEC_FUNCTION: 'functions',
+    wasm.wasmtypes.SEC_TABLE: 'tables',
+    wasm.wasmtypes.SEC_MEMORY: 'memory',
+    wasm.wasmtypes.SEC_GLOBAL: 'globals',
+    wasm.wasmtypes.SEC_EXPORT: 'exports',
+    wasm.wasmtypes.SEC_START: 'starts',
+    wasm.wasmtypes.SEC_ELEMENT: 'elements',
+    wasm.wasmtypes.SEC_CODE: 'code',
+    wasm.wasmtypes.SEC_DATA: 'data',
 }
 
 
 def accept_file(f, n):
     f.seek(0)
-    if f.read(4) != b"\x00asm":
+    if f.read(4) != b'\x00asm':
         return 0
 
-    if struct.unpack("<I", f.read(4))[0] != 0x1:
+    if struct.unpack('<I', f.read(4))[0] != 0x1:
         return 0
 
-    return "WebAssembly v%d executable" % (0x1)
+    return 'WebAssembly v%d executable' % (0x1)
 
 
 def offset_of(struc, fieldname):
@@ -39,7 +39,7 @@ def offset_of(struc, fieldname):
     dec_meta = struc.get_decoder_meta()
     for field in struc.get_meta().fields:
         if field.name != fieldname:
-            p += dec_meta["lengths"][field.name]
+            p += dec_meta['lengths'][field.name]
         else:
             return p
     raise KeyError('field not found: ' + fieldname)
@@ -49,7 +49,7 @@ def size_of(struc, fieldname=None):
     if fieldname is not None:
         # size of the given field, by name
         dec_meta = struc.get_decoder_meta()
-        return dec_meta["lengths"][fieldname]
+        return dec_meta['lengths'][fieldname]
     else:
         # size of the entire given struct
         return sum(struc.get_decoder_meta()['lengths'].values())
@@ -80,29 +80,29 @@ def MakeN(addr, size):
 
 
 def load_code_section(section, p):
-    idc.MakeName(p + offset_of(section.data, "id"), "code_id")
-    MakeN(p + offset_of(section.data, "id"), size_of(section.data, "id"))
+    idc.MakeName(p + offset_of(section.data, 'id'), 'code_id')
+    MakeN(p + offset_of(section.data, 'id'), size_of(section.data, 'id'))
 
-    ppayload = p + offset_of(section.data, "payload")
-    idc.MakeName(ppayload + offset_of(section.data.payload, "count"), "function_count")
-    MakeN(ppayload + offset_of(section.data.payload, "count"), size_of(section.data.payload, "count"))
+    ppayload = p + offset_of(section.data, 'payload')
+    idc.MakeName(ppayload + offset_of(section.data.payload, 'count'), 'function_count')
+    MakeN(ppayload + offset_of(section.data.payload, 'count'), size_of(section.data.payload, 'count'))
 
-    pbodies = ppayload + offset_of(section.data.payload, "bodies")
+    pbodies = ppayload + offset_of(section.data.payload, 'bodies')
     pcur = pbodies
     for i, body in enumerate(section.data.payload.bodies):
         fname = 'function_%X' % (i)
         idc.MakeName(pcur, fname)
 
-        idc.MakeName(pcur + offset_of(body, "local_count"), fname + '_local_count')
-        MakeN(pcur + offset_of(body, "local_count"), size_of(body, 'local_count'))
+        idc.MakeName(pcur + offset_of(body, 'local_count'), fname + '_local_count')
+        MakeN(pcur + offset_of(body, 'local_count'), size_of(body, 'local_count'))
 
-        if size_of(body, "locals") > 0:
-            idc.MakeName(pcur + offset_of(body, "locals"), fname + '_locals')
-            for j in range(size_of(body, "locals")):
-                idc.MakeByte(pcur + offset_of(body, "locals") + j)
+        if size_of(body, 'locals') > 0:
+            idc.MakeName(pcur + offset_of(body, 'locals'), fname + '_locals')
+            for j in range(size_of(body, 'locals')):
+                idc.MakeByte(pcur + offset_of(body, 'locals') + j)
 
-        idc.MakeName(pcur + offset_of(body, "code"), fname + '_code')
-        idc.MakeCode(pcur + offset_of(body, "code"))
+        idc.MakeName(pcur + offset_of(body, 'code'), fname + '_code')
+        idc.MakeCode(pcur + offset_of(body, 'code'))
 
         pcur += size_of(body)
 
@@ -118,7 +118,7 @@ def load_file(f, neflags, format):
     f.seek(0x0)
     buf = f.read(flen)
 
-    idaapi.set_processor_type("wasm", idaapi.SETPROC_ALL)
+    idaapi.set_processor_type('wasm', idaapi.SETPROC_ALL)
 
     f.seek(0x0)
     f.file2base(0, 0, len(buf), True)
@@ -152,9 +152,9 @@ def load_file(f, neflags, format):
 
     # magic
     idc.MakeDword(0x0)
-    idc.MakeName(0x0, "WASM_MAGIC")
+    idc.MakeName(0x0, 'WASM_MAGIC')
     # version
     idc.MakeDword(0x4)
-    idc.MakeName(0x4, "WASM_VERSION")
+    idc.MakeName(0x4, 'WASM_VERSION')
 
     return 1
