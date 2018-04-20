@@ -19,11 +19,10 @@ PLFM_WASM = 0x8069
 # these are wasm-specific operand types
 WASM_LOCAL = idaapi.o_idpspec0
 WASM_GLOBAL = idaapi.o_idpspec1
-WASM_GROW_MEM = idaapi.o_idpspec2
-WASM_INDIRECT = idaapi.o_idpspec3
+WASM_FUNC_INDEX = idaapi.o_idpspec2
+WASM_TYPE_INDEX = idaapi.o_idpspec3
 WASM_BLOCK = idaapi.o_idpspec4
-WASM_UNK = idaapi.o_idpspec5
-
+WASM_ALIGN = idaapi.o_idpspec5
 
 def no_exceptions(f):
     '''
@@ -415,6 +414,11 @@ class wasm_processor_t(idaapi.processor_t):
         return 1
 
     @ida_entry
+    def out_mnem(self, ctx):
+        postfix = ''
+        ctx.out_mnem(20, postfix)
+
+    @ida_entry
     def notify_out_operand(self, ctx, op):
         """
         Generate text representation of an instructon operand.
@@ -426,19 +430,38 @@ class wasm_processor_t(idaapi.processor_t):
         """
         logger.debug('notify out operand')
 
-        if op.type == WASM_GLOBAL:
-            logger.debug('out: wasm global %x', op.value)
-            ctx.out_value(op, idaapi.OOFW_IMM | idaapi.OOFW_32)
+        if op.type == WASM_BLOCK:
+            logger.debug('out: wasm block %x', op.value)
+            if op.value == 0xFFFFFFC0:  # VarInt7 for 0x40
+                ctx.out_keyword('type:empty')
+            else:
+                # ref: https://webassembly.github.io/spec/core/binary/types.html#binary-valtype
+                # TODO(wb): untested!
+                ctx.out_keyword({
+                    # TODO(wb): I don't think these constants will line up in practice
+                    0x7F: 'type:i32',
+                    0x7E: 'type:i64',
+                    0x7D: 'type:f32',
+                    0x7C: 'type:f64',
+                }[op.value])
             return True
-
-        elif op.type == WASM_LOCAL:
-            logger.debug('out: wasm local %x', op.value)
-            ctx.out_value(op, idaapi.OOFW_IMM | idaapi.OOFW_32)
-            return False
 
         elif op.type == idaapi.o_imm:
             logger.debug('out: wasm immediate: %x', op)
-            width = self.dt_to_width(ctx.insn.Op1.dtype)
+
+            wtype = op.specval
+            if wtype == WASM_GLOBAL:
+                ctx.out_keyword('global:')
+            elif wtype == WASM_LOCAL:
+                ctx.out_keyword('local:')
+            elif wtype == WASM_FUNC_INDEX:
+                ctx.out_keyword('func:')
+            elif wtype == WASM_TYPE_INDEX:
+                ctx.out_keyword('type:')
+            elif wtype == WASM_ALIGN:
+                ctx.out_keyword('align:')
+
+            width = self.dt_to_width(op.dtype)
             ctx.out_value(op, idaapi.OOFW_IMM | width)
             return True
 
@@ -491,11 +514,6 @@ class wasm_processor_t(idaapi.processor_t):
         return True
 
     @ida_entry
-    def out_mnem(self, ctx):
-        postfix = ''
-        ctx.out_mnem(20, postfix)
-
-    @ida_entry
     def notify_out_insn(self, ctx):
         '''
         must not change the database.
@@ -505,29 +523,16 @@ class wasm_processor_t(idaapi.processor_t):
         '''
         ctx.out_mnemonic()
         ctx.out_one_operand(0)
-        ctx.set_gen_cmt()
-        ctx.flush_outbuf()
-        return
-        # TODO(wb): need to output the operand
-
-        ctx.out_one_operand(0)
 
         for i in xrange(1, 3):
             op = ctx.insn[i]
 
-            if op.type == o_void:
+            if op.type == idaapi.o_void:
                 break
 
             ctx.out_symbol(',')
             ctx.out_char(' ')
             ctx.out_one_operand(i)
-
-        if ctx.insn.itype == self.itype_MOVREL:
-            fnaddr = self.check_thunk(ctx.insn.Op2.addr)
-            if fnaddr != None:
-                nm = get_ea_name(fnaddr, ida_name.GN_VISIBLE)
-                if nm:
-                    ctx.out_line("; Thunk to " + nm, COLOR_AUTOCMT)
 
         ctx.set_gen_cmt()
         ctx.flush_outbuf()
@@ -574,10 +579,8 @@ class wasm_processor_t(idaapi.processor_t):
 
             immtype = bc.imm.get_meta().structure
             logger.info('immtype: %s', immtype)
-            logger.info('%s', immtype == wasm.immtypes.GlobalVarXsImm)
             if immtype == wasm.immtypes.BlockImm:
                 # sig = BlockTypeField()
-                '''
                 insn.Op1.type = WASM_BLOCK
                 # wasm is currently single-byte opcode only
                 insn.Op1.offb = 1
@@ -585,53 +588,116 @@ class wasm_processor_t(idaapi.processor_t):
                 insn.Op1.flags = idaapi.OF_NO_BASE_DISP | idaapi.OF_NUMBER | idaapi.OF_SHOW
                 insn.Op1.dtype = idaapi.dt_dword
                 insn.Op1.value = bc.imm.sig
-                '''
+                insn.Op1.specval = WASM_BLOCK
 
             elif immtype == wasm.immtypes.BranchImm:
                 # relative_depth = VarUInt32Field()
-                pass
+                insn.Op1.type = idaapi.o_imm
+                insn.Op1.offb = 1
+                insn.Op1.offo = 1
+                insn.Op1.flags = idaapi.OF_NO_BASE_DISP | idaapi.OF_NUMBER | idaapi.OF_SHOW
+                insn.Op1.dtype = idaapi.dt_dword
+                insn.Op1.value = bc.imm.relative_depth
 
             elif immtype == wasm.immtypes.BranchTableImm:
                 # target_count = VarUInt32Field()
                 # target_table = RepeatField(VarUInt32Field(), lambda x: x.target_count)
                 # default_target = VarUInt32Field()
-                pass
+                insn.Op1.type = idaapi.o_imm
+                insn.Op1.offb = 1
+                insn.Op1.offo = 1
+                insn.Op1.flags = idaapi.OF_NO_BASE_DISP | idaapi.OF_NUMBER | idaapi.OF_SHOW
+                insn.Op1.dtype = idaapi.dt_dword
+                insn.Op1.value = bc.imm.target_count
+
+                insn.Op2.type = idaapi.o_imm
+                insn.Op2.offb = 1  # TODO(wb)
+                insn.Op2.offo = 1  # TODO(wb)
+                insn.Op2.flags = idaapi.OF_NO_BASE_DISP | idaapi.OF_NUMBER | idaapi.OF_SHOW
+                insn.Op2.dtype = idaapi.dt_dword
+                insn.Op2.value = bc.imm.target_table
+
+                insn.Op3.type = idaapi.o_imm
+                insn.Op3.offb = 1  # TODO(wb)
+                insn.Op3.offo = 1  # TODO(wb)
+                insn.Op3.flags = idaapi.OF_NO_BASE_DISP | idaapi.OF_NUMBER | idaapi.OF_SHOW
+                insn.Op3.dtype = idaapi.dt_dword
+                insn.Op3.value = bc.imm.default_target
 
             elif immtype == wasm.immtypes.CallImm:
                 # function_index = VarUInt32Field()
-                pass
+                insn.Op1.type = idaapi.o_imm
+                insn.Op1.offb = 1
+                insn.Op1.offo = 1
+                insn.Op1.flags = idaapi.OF_NO_BASE_DISP | idaapi.OF_NUMBER | idaapi.OF_SHOW
+                insn.Op1.dtype = idaapi.dt_dword
+                insn.Op1.value = bc.imm.function_index
+                insn.Op1.specval = WASM_FUNC_INDEX
 
             elif immtype == wasm.immtypes.CallIndirectImm:
                 # type_index = VarUInt32Field()
                 # reserved = VarUInt1Field()
-                pass
+                insn.Op1.type = idaapi.o_imm
+                insn.Op1.offb = 1
+                insn.Op1.offo = 1
+                insn.Op1.flags = idaapi.OF_NO_BASE_DISP | idaapi.OF_NUMBER | idaapi.OF_SHOW
+                insn.Op1.dtype = idaapi.dt_dword
+                insn.Op1.value = bc.imm.type_index
+                insn.Op1.specval = WASM_TYPE_INDEX
+
+                insn.Op2.type = idaapi.o_imm
+                insn.Op2.offb = 1  # TODO(wb)
+                insn.Op2.offo = 1  # TODO(wb)
+                insn.Op2.flags = idaapi.OF_NO_BASE_DISP | idaapi.OF_NUMBER | idaapi.OF_SHOW
+                insn.Op2.dtype = idaapi.dt_dword
+                insn.Op2.value = bc.imm.reserved
 
             elif immtype == wasm.immtypes.LocalVarXsImm:
                 # local_index = VarUInt32Field()
-                insn.Op1.type = WASM_GLOBAL
+                insn.Op1.type = idaapi.o_imm
                 insn.Op1.offb = 1
                 insn.Op1.offo = 1
                 insn.Op1.flags = idaapi.OF_NO_BASE_DISP | idaapi.OF_NUMBER | idaapi.OF_SHOW
                 insn.Op1.dtype = idaapi.dt_dword
                 insn.Op1.value = bc.imm.local_index
+                insn.Op1.specval = WASM_LOCAL
 
             elif immtype == wasm.immtypes.GlobalVarXsImm:
                 # global_index = VarUInt32Field()
-                insn.Op1.type = WASM_LOCAL
+                insn.Op1.type = idaapi.o_imm
                 insn.Op1.offb = 1
                 insn.Op1.offo = 1
                 insn.Op1.flags = idaapi.OF_NO_BASE_DISP | idaapi.OF_NUMBER | idaapi.OF_SHOW
                 insn.Op1.dtype = idaapi.dt_dword
                 insn.Op1.value = bc.imm.global_index
+                insn.Op1.specval = WASM_GLOBAL
 
             elif immtype == wasm.immtypes.MemoryImm:
                 # flags = VarUInt32Field()
                 # offset = VarUInt32Field()
-                pass
+                insn.Op1.type = idaapi.o_imm
+                insn.Op1.offb = 1
+                insn.Op1.offo = 1
+                insn.Op1.flags = idaapi.OF_NO_BASE_DISP | idaapi.OF_NUMBER | idaapi.OF_SHOW
+                insn.Op1.dtype = idaapi.dt_dword
+                insn.Op1.value = bc.imm.flags
+                insn.Op1.specval = WASM_ALIGN
+
+                insn.Op2.type = idaapi.o_imm
+                insn.Op2.offb = 1  # TODO(wb)
+                insn.Op2.offo = 1  # TODO(wb)
+                insn.Op2.flags = idaapi.OF_NO_BASE_DISP | idaapi.OF_NUMBER | idaapi.OF_SHOW
+                insn.Op2.dtype = idaapi.dt_dword
+                insn.Op2.value = bc.imm.offset
 
             elif immtype == wasm.immtypes.CurGrowMemImm:
                 # reserved = VarUInt1Field()
-                pass
+                insn.Op1.type = idaapi.o_imm
+                insn.Op1.offb = 1
+                insn.Op1.offo = 1
+                insn.Op1.flags = idaapi.OF_NO_BASE_DISP | idaapi.OF_NUMBER | idaapi.OF_SHOW
+                insn.Op1.dtype = idaapi.dt_dword
+                insn.Op1.value = bc.imm.reserved
 
             elif immtype == wasm.immtypes.I32ConstImm:
                 # value = VarInt32Field()
@@ -653,11 +719,21 @@ class wasm_processor_t(idaapi.processor_t):
 
             elif immtype == wasm.immtypes.F32ConstImm:
                 # value = UInt32Field()
-                pass
+                insn.Op1.type = idaapi.o_imm
+                insn.Op1.offb = 1
+                insn.Op1.offo = 1
+                insn.Op1.flags = idaapi.OF_NO_BASE_DISP | idaapi.OF_NUMBER | idaapi.OF_SHOW
+                insn.Op1.dtype = idaapi.dt_float
+                insn.Op1.value = bc.imm.value
 
             elif immtype == wasm.immtypes.F64ConstImm:
                 # value = UInt64Field()
-                pass
+                insn.Op1.type = idaapi.o_imm
+                insn.Op1.offb = 1
+                insn.Op1.offo = 1
+                insn.Op1.flags = idaapi.OF_NO_BASE_DISP | idaapi.OF_NUMBER | idaapi.OF_SHOW
+                insn.Op1.dtype = idaapi.dt_double
+                insn.Op1.value = bc.imm.value
 
         return insn.size
 
