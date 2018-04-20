@@ -233,7 +233,7 @@ class wasm_processor_t(idaapi.processor_t):
         for EBC it's 8 bytes of the actual return address
         plus 8 bytes of the saved frame address
         """
-        print('notify get frame retsize')
+        logger.debug('notify get frame retsize')
         return 16
 
     @ida_entry
@@ -242,7 +242,7 @@ class wasm_processor_t(idaapi.processor_t):
         Get instruction comment. 'insn' describes the instruction in question
         @return: None or the comment string
         """
-        print('notify get autocmt')
+        logger.debug('notify get autocmt')
         if 'cmt' in self.instruc[insn.itype]:
           return self.instruc[insn.itype]['cmt'](insn)
 
@@ -266,16 +266,16 @@ class wasm_processor_t(idaapi.processor_t):
 
     @ida_entry
     def notify_newfile(self, filename):
-        print('notify newfile', filename)
+        logger.debug('notify newfile: %s', filename)
 
     @ida_entry
     def notify_oldfile(self, filename):
-        print('notify oldfile', filename)
+        logger.debug('notify oldfile: %s', filename)
 
     @ida_entry
     def notify_out_header(self, ctx):
         """function to produce start of disassembled text"""
-        print('notify out header')
+        logger.debug('notify out header')
         ctx.out_line("; natural unit size: %d bits" % (self.PTRSZ*8))
         ctx.flush_outbuf(0)
 
@@ -289,7 +289,7 @@ class wasm_processor_t(idaapi.processor_t):
                   == 1: creating chunks
           returns: probability 0..100
         """
-        print('notify may be func')
+        logger.debug('notify may be func')
         # TODO(wb): parse functions section for function start addresses. nothing else.
 
         if is_reg(insn.Op1, self.ireg_SP) and insn.Op2.type == o_displ and\
@@ -306,7 +306,7 @@ class wasm_processor_t(idaapi.processor_t):
         Check for EBC thunk at addr
         dd fnaddr - (addr+4), 0, 0, 0
         """
-        print("check thunk")
+        logger.debug("check thunk")
         delta = get_dword(addr)
         fnaddr = (delta + addr + 4) & 0xFFFFFFFF
         if is_off(get_flags(addr), 0):
@@ -328,7 +328,7 @@ class wasm_processor_t(idaapi.processor_t):
                 return None
 
     def add_stkpnt(self, insn, pfn, v):
-        print('add stkpnt')
+        logger.debug('add stkpnt')
         if pfn:
             end = insn.ea + insn.size
             if not is_fixed_spd(end):
@@ -339,7 +339,7 @@ class wasm_processor_t(idaapi.processor_t):
         Trace the value of the SP and create an SP change point if the current
         instruction modifies the SP.
         """
-        print('trace sp')
+        logger.debug('trace sp')
         pfn = get_func(insn.ea)
         if not pfn:
             return
@@ -367,7 +367,7 @@ class wasm_processor_t(idaapi.processor_t):
         all information about the instruction is in 'insn' structure.
         If zero is returned, the kernel will delete the instruction.
         """
-        print('notify emu')
+        logger.debug('notify emu')
 
         # add fall-through flows
         if insn.get_canon_feature() & wasm.opcodes.INSN_NO_FLOW:
@@ -506,6 +506,7 @@ class wasm_processor_t(idaapi.processor_t):
         """
         Decodes an instruction into insn
         """
+        logger.debug('decode instruction at 0x%X', insn.ea)
         opb = insn.get_next_byte()
 
         if opb not in wasm.opcodes.OPCODE_MAP:
@@ -535,6 +536,8 @@ class wasm_processor_t(idaapi.processor_t):
                 logging.debug('  - %s: %s', field.name, str(getattr(bc.imm, field.name)))
 
             immtype = bc.imm.get_meta().structure
+            logger.info('immtype: %s', immtype)
+            logger.info('%s', immtype == wasm.immtypes.GlobalVarXsImm)
             if immtype == wasm.immtypes.BlockImm:
                 # sig = BlockTypeField()
                 '''
