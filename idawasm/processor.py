@@ -6,6 +6,7 @@ import functools
 import wasm
 import wasm.decode
 import wasm.wasmtypes
+import hexdump
 
 import idc
 import idaapi
@@ -509,18 +510,24 @@ class wasm_processor_t(idaapi.processor_t):
         logger.debug('decode instruction at 0x%X', insn.ea)
         opb = insn.get_next_byte()
 
+        logger.debug('opb: 0x%x', opb)
+
         if opb not in wasm.opcodes.OPCODE_MAP:
             return 0
 
-        op = wasm.opcodes.OPCODE_MAP.get(opb)
-        insn.itype = op.id
+        insn.itype = self.insns[opb]['id']
 
-        if op.imm_struct:
-            buf = idc.GetManyBytes(insn.ea, 0x10)
+        if wasm.opcodes.OPCODE_MAP.get(opb).imm_struct:
+            # warning: py2.7
+            buf = str(bytearray(idc.GetManyBytes(insn.ea, 0x10)))
         else:
-            buf = bytes([opb])
+            # warning: py2.7
+            buf = str(bytearray([opb]))
+
+        logger.debug('buf: %s', hexdump.hexdump(buf, result='return'))
 
         bc = next(wasm.decode.decode_bytecode(buf))
+        logger.debug('insn len: %d', bc.len)
         for _ in range(1, bc.len):
             # consume any additional bytes
             insn.get_next_byte()
@@ -606,24 +613,26 @@ class wasm_processor_t(idaapi.processor_t):
 
     def init_instructions(self):
         # Now create an instruction table compatible with IDA processor module requirements
-        insns = []
-        for op in wasm.opcodes.OPCODES:
-            insns.append({
+        self.insns = {}
+        for i, op in enumerate(wasm.opcodes.OPCODES):
+            self.insns[op.id] = {
+                # the opcode byte
+                'opcode': op.id,
+                # the IDA constant for this instruction
+                'id': i,
+                # danger: this must be an ASCII-encoded byte string, *not* unicode!
                 'name': op.mnemonic.encode('ascii'),
                 'feature': op.flags,
                 'cmd': None,          # TODO(wb): add cmt help
-            })
+            }
             clean_mnem = op.mnemonic.encode('ascii').replace('.', '_').replace('/', '_').upper()
-            setattr(self, 'itype_' + clean_mnem, op.id)
-
-        # icode of the last instruction + 1
-        # ref: https://github.com/athre0z/wasm/blob/master/wasm/opcodes.py#L198
-        #
-        #     Opcode(0xbf, 'f64.reinterpret/i64', None, 0),
-        self.instruc_end = 0xC0
+            # the itype constant value must be contiguous, which sucks, because its not the op.id value.
+            setattr(self, 'itype_' + clean_mnem, i)
 
         # Array of instructions
-        self.instruc = insns
+        # the index into this array apparently must match the `self.itype_*`.
+        self.instruc = list(sorted(self.insns.values(), key=lambda i: i['id']))
+        self.instruc_end = len(self.instruc)
 
         # Icode of return instruction. It is ok to give any of possible return
         # instructions
