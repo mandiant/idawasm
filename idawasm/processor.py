@@ -1,3 +1,42 @@
+# TODO:
+#  - parse items up front
+#    - all sections
+#    - blocks and branch targets
+#  - use $paramN for params, based on function prototype
+#  - mark branch code xrefs during emu
+#  - add names for globals
+#  - mark data xref to memory load/store
+#  - mark data xref to global load/store
+#  - create functions
+#  - enable global var renaming
+#  - show function prototype and local var layout at function start
+#    - leading parenthesis
+#    - fn name
+#    - arguments and types
+#    - local vars and types
+#  - render trailing parenthesis
+#  - compute stack deltas
+
+'''
+
+# WebAssembly processor module design
+
+## types
+
+wasm supports memory, discrete global variables, parameters, local variables, and a stack.
+there are no registers.
+how do we map these into IDA concepts that we can rename and reason about?
+
+parameters and local variables - map to "registers".
+you can rename registers with function scope, see: https://www.hex-rays.com/products/ida/support/idadoc/1346.shtml
+
+stack: since operands can only affect elements at the top (no arbitrary indexing), we'll simply track the sp for fun.
+
+memory: use offsets into memory section.
+
+global variables: use offsets into globals section.
+'''
+
 import sys
 import struct
 import logging
@@ -364,18 +403,33 @@ class wasm_processor_t(idaapi.processor_t):
                 }[op.value])
             return True
 
+        elif op.type == idaapi.o_reg:
+            wtype = op.specval
+            if wtype == WASM_LOCAL:
+                sreg = self.reg_names[op.reg]
+                ctx.out_register(sreg)
+                return True
+
         elif op.type == idaapi.o_imm:
             wtype = op.specval
             if wtype == WASM_GLOBAL:
-                ctx.out_keyword('global:')
+                # TODO: would like to make this a name that a user can re-name.
+                # might have to make this some kind of address.
+                ctx.out_keyword('$global%d' % (op.value))
+                return True
+
             elif wtype == WASM_LOCAL:
-                ctx.out_keyword('local:')
+                # TODO: would like to make this a name that a user can re-name.
+                ctx.out_keyword('$var%d' % (op.value))
+                return True
+
             elif wtype == WASM_FUNC_INDEX:
                 ctx.out_keyword('func:')
             elif wtype == WASM_TYPE_INDEX:
                 ctx.out_keyword('type:')
+
             elif wtype == WASM_ALIGN:
-                ctx.out_keyword('align:')
+                return False
 
             width = self.dt_to_width(op.dtype)
             ctx.out_value(op, idaapi.OOFW_IMM | width)
@@ -514,12 +568,12 @@ class wasm_processor_t(idaapi.processor_t):
 
             elif immtype == wasm.immtypes.LocalVarXsImm:
                 # local_index = VarUInt32Field()
-                insn.Op1.type = idaapi.o_imm
+                insn.Op1.type = idaapi.o_reg
                 insn.Op1.offb = 1
                 insn.Op1.offo = 1
-                insn.Op1.flags = idaapi.OF_NO_BASE_DISP | idaapi.OF_NUMBER | idaapi.OF_SHOW
-                insn.Op1.dtype = idaapi.dt_dword
-                insn.Op1.value = bc.imm.local_index
+                #insn.Op1.flags = idaapi.OF_NO_BASE_DISP | idaapi.OF_NUMBER | idaapi.OF_SHOW
+                #insn.Op1.dtype = idaapi.dt_dword
+                insn.Op1.reg  = bc.imm.local_index
                 insn.Op1.specval = WASM_LOCAL
 
             elif immtype == wasm.immtypes.GlobalVarXsImm:
@@ -536,19 +590,19 @@ class wasm_processor_t(idaapi.processor_t):
                 # flags = VarUInt32Field()
                 # offset = VarUInt32Field()
                 insn.Op1.type = idaapi.o_imm
-                insn.Op1.offb = 1
-                insn.Op1.offo = 1
+                insn.Op1.offb = 1  # TODO(wb)
+                insn.Op1.offo = 1  # TODO(wb)
                 insn.Op1.flags = idaapi.OF_NO_BASE_DISP | idaapi.OF_NUMBER | idaapi.OF_SHOW
                 insn.Op1.dtype = idaapi.dt_dword
-                insn.Op1.value = bc.imm.flags
-                insn.Op1.specval = WASM_ALIGN
+                insn.Op1.value = bc.imm.offset
 
                 insn.Op2.type = idaapi.o_imm
-                insn.Op2.offb = 1  # TODO(wb)
-                insn.Op2.offo = 1  # TODO(wb)
+                insn.Op2.offb = 1
+                insn.Op2.offo = 1
                 insn.Op2.flags = idaapi.OF_NO_BASE_DISP | idaapi.OF_NUMBER | idaapi.OF_SHOW
                 insn.Op2.dtype = idaapi.dt_dword
-                insn.Op2.value = bc.imm.offset
+                insn.Op2.value = bc.imm.flags
+                insn.Op2.specval = WASM_ALIGN
 
             elif immtype == wasm.immtypes.CurGrowMemImm:
                 # reserved = VarUInt1Field()
@@ -628,15 +682,29 @@ class wasm_processor_t(idaapi.processor_t):
         """This function parses the register table and creates corresponding ireg_XXX constants"""
 
         # Registers definition
-        self.reg_names = [
-            "SP",
-            "CS",
-            "DS"
-        ]
+        # for wasm, "registers" are local variables.
+        self.reg_names = []
 
-        # Create the ireg_XXXX constants
+        # note: IDA reg_t size is 16-bits
+        # TODO: scan functions and pick max local size.
+        MAX_LOCALS = 0x100
+        for i in range(MAX_LOCALS):
+            self.reg_names.append("$local%d" % (i))
+        # TODO: scan functions and pick max param size.
+        MAX_PARAMS = 0x100
+        for i in range(MAX_PARAMS):
+            self.reg_names.append("$param%d" % (i))
+
+        # these are fake, "virtual" registers.
+        # req'd for IDA, apparently.
+        self.reg_names.append("SP")
+        self.reg_names.append("CS")
+        self.reg_names.append("DS")
+
+        # Create the ireg_XXXX constants.
+        # for wasm, will look like: ireg_LOCAL0, ireg_PARAM0
         for i in xrange(len(self.reg_names)):
-            setattr(self, 'ireg_' + self.reg_names[i], i)
+            setattr(self, 'ireg_' + self.reg_names[i].replace('$', ''), i)
 
         # Segment register information (use virtual CS and DS registers if your
         # processor doesn't have segment registers):
