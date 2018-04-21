@@ -248,7 +248,6 @@ class wasm_processor_t(idaapi.processor_t):
         Get instruction comment. 'insn' describes the instruction in question
         @return: None or the comment string
         """
-        logger.debug('notify get autocmt')
         if 'cmt' in self.instruc[insn.itype]:
           return self.instruc[insn.itype]['cmt'](insn)
 
@@ -272,18 +271,16 @@ class wasm_processor_t(idaapi.processor_t):
 
     @ida_entry
     def notify_newfile(self, filename):
-        logger.debug('notify newfile: %s', filename)
+        pass
 
     @ida_entry
     def notify_oldfile(self, filename):
-        logger.debug('notify oldfile: %s', filename)
+        pass
 
     @ida_entry
     def notify_out_header(self, ctx):
         """function to produce start of disassembled text"""
-        logger.debug('notify out header')
-        ctx.out_line("; natural unit size: %d bits" % (self.PTRSZ*8))
-        ctx.flush_outbuf(0)
+        pass
 
     @ida_entry
     def notify_may_be_func(self, insn, state):
@@ -306,32 +303,6 @@ class wasm_processor_t(idaapi.processor_t):
             else:
                 return 0
         return 10
-
-    def check_thunk(self, addr):
-        """
-        Check for EBC thunk at addr
-        dd fnaddr - (addr+4), 0, 0, 0
-        """
-        logger.debug("check thunk")
-        delta = get_dword(addr)
-        fnaddr = (delta + addr + 4) & 0xFFFFFFFF
-        if is_off(get_flags(addr), 0):
-            # already an offset
-            if ida_offset.get_offbase(addr, 0) == addr + 4:
-                return fnaddr
-            else:
-                return None
-        # should be followed by three zeroes
-        if delta == 0 or get_dword(addr+4) != 0 or\
-        get_dword(addr+8) != 0 or get_dword(addr+12) != 0:
-            return None
-        if segtype(fnaddr) == SEG_CODE:
-            # looks good, create the offset
-            create_dword(addr)
-            if ida_offset.op_offset(addr, 0, REF_OFF32|REFINFO_NOBASE, BADADDR, addr + 4):
-                return fnaddr
-            else:
-                return None
 
     def add_stkpnt(self, insn, pfn, v):
         logger.debug('add stkpnt')
@@ -428,10 +399,7 @@ class wasm_processor_t(idaapi.processor_t):
         This function uses out_...() functions from ua.hpp to generate the operand text
         Returns: 1-ok, 0-operand is hidden.
         """
-        logger.debug('notify out operand')
-
         if op.type == WASM_BLOCK:
-            logger.debug('out: wasm block %x', op.value)
             if op.value == 0xFFFFFFC0:  # VarInt7 for 0x40
                 ctx.out_keyword('type:empty')
             else:
@@ -447,8 +415,6 @@ class wasm_processor_t(idaapi.processor_t):
             return True
 
         elif op.type == idaapi.o_imm:
-            logger.debug('out: wasm immediate: %x', op)
-
             wtype = op.specval
             if wtype == WASM_GLOBAL:
                 ctx.out_keyword('global:')
@@ -465,49 +431,6 @@ class wasm_processor_t(idaapi.processor_t):
             ctx.out_value(op, idaapi.OOFW_IMM | width)
             return True
 
-        else:
-            logger.debug('out: unk type: %x', op.type)
-            print(dir(op.insn))
-            return False
-
-        return True
-
-        optype = op.type
-        fl     = op.specval
-        signed = OOF_SIGNED if fl & self.FLo_SIGNED != 0 else 0
-        def_arg = is_defarg(get_flags(ctx.insn.ea), op.n)
-
-        if optype == o_reg:
-            ctx.out_register(self.reg_names[op.reg])
-
-        elif optype == o_imm:
-            # for immediate loads, use the transfer width (type of first operand)
-            if op.n == 1:
-                width = self.dt_to_width(ctx.insn.Op1.dtype)
-            else:
-                width = OOFW_32 if self.PTRSZ == 4 else OOFW_64
-            ctx.out_value(op, OOFW_IMM | signed | width)
-
-        elif optype in [o_near, o_mem]:
-            r = ctx.out_name_expr(op, op.addr, BADADDR)
-            if not r:
-                ctx.out_tagon(COLOR_ERROR)
-                ctx.out_btoa(op.addr, 16)
-                ctx.out_tagoff(COLOR_ERROR)
-                remember_problem(PR_NONAME, ctx.insn.ea)
-
-        elif optype == o_displ:
-            indirect = fl & self.FLo_INDIRECT != 0
-            if indirect:
-                ctx.out_symbol('[')
-
-            ctx.out_register(self.reg_names[op.reg])
-
-            if op.addr != 0 or def_arg:
-                ctx.out_value(op, OOF_ADDR | (OOFW_32 if self.PTRSZ == 4 else OOFW_64) | signed | OOFS_NEEDSIGN)
-
-            if indirect:
-                ctx.out_symbol(']')
         else:
             return False
 
@@ -542,10 +465,7 @@ class wasm_processor_t(idaapi.processor_t):
         """
         Decodes an instruction into insn
         """
-        logger.debug('decode instruction at 0x%X', insn.ea)
         opb = insn.get_next_byte()
-
-        logger.debug('opb: 0x%x', opb)
 
         if opb not in wasm.opcodes.OPCODE_MAP:
             return 0
@@ -559,26 +479,16 @@ class wasm_processor_t(idaapi.processor_t):
             # warning: py2.7
             buf = str(bytearray([opb]))
 
-        logger.debug('buf: %s', hexdump.hexdump(buf, result='return'))
-
         bc = next(wasm.decode.decode_bytecode(buf))
-        logger.debug('insn len: %d', bc.len)
         for _ in range(1, bc.len):
             # consume any additional bytes
             insn.get_next_byte()
-
-        logging.debug('bytecode: %s', bc)
 
         insn.Op1.type  = idaapi.o_void
         insn.Op2.type  = idaapi.o_void
 
         if bc.imm is not None:
-            logging.debug('immediate: %s', bc.imm.get_meta().structure)
-            for field in bc.imm.get_meta().fields:
-                logging.debug('  - %s: %s', field.name, str(getattr(bc.imm, field.name)))
-
             immtype = bc.imm.get_meta().structure
-            logger.info('immtype: %s', immtype)
             if immtype == wasm.immtypes.BlockImm:
                 # sig = BlockTypeField()
                 insn.Op1.type = WASM_BLOCK
