@@ -7,20 +7,7 @@ import wasm.wasmtypes
 import idc
 import idaapi
 
-
-SECTION_NAMES = {
-    wasm.wasmtypes.SEC_TYPE: 'types',
-    wasm.wasmtypes.SEC_IMPORT: 'imports',
-    wasm.wasmtypes.SEC_FUNCTION: 'functions',
-    wasm.wasmtypes.SEC_TABLE: 'tables',
-    wasm.wasmtypes.SEC_MEMORY: 'memory',
-    wasm.wasmtypes.SEC_GLOBAL: 'globals',
-    wasm.wasmtypes.SEC_EXPORT: 'exports',
-    wasm.wasmtypes.SEC_START: 'starts',
-    wasm.wasmtypes.SEC_ELEMENT: 'elements',
-    wasm.wasmtypes.SEC_CODE: 'code',
-    wasm.wasmtypes.SEC_DATA: 'data',
-}
+import idawasm.const
 
 
 def accept_file(f, n):
@@ -133,9 +120,9 @@ def load_file(f, neflags, format):
                 # fetch custom name
                 sname = ''
             else:
-                sname = SECTION_NAMES.get(section.data.id, 'unknown')
+                sname = idawasm.const.WASM_SECTION_NAMES.get(section.data.id, 'unknown')
 
-        if sname != 'header' and section.data.id == wasm.wasmtypes.SEC_CODE:
+        if sname != 'header' and section.data.id in (wasm.wasmtypes.SEC_CODE, wasm.wasmtypes.SEC_GLOBAL):
             stype = 'CODE'
         else:
             stype = 'DATA'
