@@ -11,6 +11,8 @@ import hexdump
 import idc
 import idaapi
 
+import idawasm.const
+
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +50,7 @@ class wasm_processor_t(idaapi.processor_t):
     id = PLFM_WASM
 
     # Processor features
-    flag = idaapi.PR_SEGS | idaapi.PR_DEFSEG32 | idaapi.PR_USE32 | idaapi.PRN_HEX | idaapi.PR_RNAMESOK | idaapi.PR_NO_SEGMOVE
+    flag = idaapi.PR_USE32 | idaapi.PR_RNAMESOK | idaapi.PRN_HEX | idaapi.PR_NO_SEGMOVE
 
     # Number of bits in a byte for code segments (usually 8)
     # IDA supports values up to 32 bits
@@ -106,7 +108,7 @@ class wasm_processor_t(idaapi.processor_t):
         'end': "end",
 
         # comment string (see also cmnt2)
-        'cmnt': ";",
+        'cmnt': ";;",
 
         # ASCII string delimiter
         'ascsep': "\"",
@@ -211,15 +213,6 @@ class wasm_processor_t(idaapi.processor_t):
         'a_sizeof_fmt': "size %s",
     } # Assembler
 
-    # Some internal flags used by the decoder, emulator and output
-    # operand size or move size; can be in both auxpref and OpN.specval
-    FL_B = 0x0001 # 8 bits
-    FL_W = 0x0002 # 16 bits
-    FL_D = 0x0004 # 32 bits
-    FL_Q = 0x0008 # 64 bits
-
-    def native_dt(self):
-        return dt_qword if self.PTRSZ==8 else dt_dword
 
     def dt_to_width(self, dt):
         """Returns OOFW_xxx flag given a dt_xxx"""
@@ -233,16 +226,6 @@ class wasm_processor_t(idaapi.processor_t):
     #
     # ----------------------------------------------------------------------
     @ida_entry
-    def notify_get_frame_retsize(self, func_ea):
-        """
-        Get size of function return address in bytes
-        for EBC it's 8 bytes of the actual return address
-        plus 8 bytes of the saved frame address
-        """
-        logger.debug('notify get frame retsize')
-        return 16
-
-    @ida_entry
     def notify_get_autocmt(self, insn):
         """
         Get instruction comment. 'insn' describes the instruction in question
@@ -250,37 +233,6 @@ class wasm_processor_t(idaapi.processor_t):
         """
         if 'cmt' in self.instruc[insn.itype]:
           return self.instruc[insn.itype]['cmt'](insn)
-
-    @ida_entry
-    def notify_can_have_type(self, op):
-        """
-        Can the operand have a type as offset, segment, decimal, etc.
-        (for example, a register AX can't have a type, meaning that the user can't
-        change its representation. see bytes.hpp for information about types and flags)
-        Returns: bool
-        """
-        return True
-
-    @ida_entry
-    def notify_is_align_insn(self, ea):
-        """
-        Is the instruction created only for alignment purposes?
-        Returns: If so, the number of bytes in the instruction
-        """
-        return 0
-
-    @ida_entry
-    def notify_newfile(self, filename):
-        pass
-
-    @ida_entry
-    def notify_oldfile(self, filename):
-        pass
-
-    @ida_entry
-    def notify_out_header(self, ctx):
-        """function to produce start of disassembled text"""
-        pass
 
     @ida_entry
     def notify_may_be_func(self, insn, state):
@@ -344,8 +296,6 @@ class wasm_processor_t(idaapi.processor_t):
         all information about the instruction is in 'insn' structure.
         If zero is returned, the kernel will delete the instruction.
         """
-        logger.debug('notify emu')
-
         # add fall-through flows
         if insn.get_canon_feature() & wasm.opcodes.INSN_NO_FLOW:
             # itype_UNREACHABLE, itype_RETURN
