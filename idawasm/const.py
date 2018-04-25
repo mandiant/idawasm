@@ -32,3 +32,10 @@ WASM_SECTION_NAMES = {
     wasm.wasmtypes.SEC_CODE: 'code',
     wasm.wasmtypes.SEC_DATA: 'data',
 }
+
+
+# via: https://github.com/WebAssembly/design/blob/master/BinaryEncoding.md#external_kind
+WASM_EXTERNAL_KIND_FUNCTION = 0
+WASM_EXTERNAL_KIND_TABLE = 1
+WASM_EXTERNAL_KIND_MEMORY = 2
+WASM_EXTERNAL_KIND_GLOBAL = 3
