@@ -489,6 +489,11 @@ class wasm_processor_t(idaapi.processor_t):
         args:
           ctx (object): has a `.insn` field.
         '''
+        fn = self.function_offsets.get(ctx.insn.ea, None)
+        if fn is not None:
+            proto = self._render_function_prototype(fn)
+            ctx.gen_printf(0, proto + '\n')
+
         ctx.out_mnemonic()
         ctx.out_one_operand(0)
 
