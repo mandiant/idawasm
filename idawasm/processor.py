@@ -254,7 +254,7 @@ class wasm_processor_t(idaapi.processor_t):
 
             functions[function_index] = {
                 'index': function_index,
-                'offset': pbody,
+                'offset': pbody + offset_of(body, 'code'),
                 'type': struc_to_dict(ftype),
                 'exported': False,
                 'imported': False,
