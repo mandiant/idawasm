@@ -319,6 +319,9 @@ class wasm_processor_t(idaapi.processor_t):
         for function in self.functions.values():
             print(self._render_function_prototype(function))
         self.function_offsets = {f['offset']: f for f in self.functions.values() if 'offset' in f}
+        self.function_ranges = {
+            (f['offset'], f['offset'] + f['size']): f for f in self.functions.values() if 'offset' in f
+        }
 
     @ida_entry
     def notify_get_autocmt(self, insn):
@@ -424,6 +427,16 @@ class wasm_processor_t(idaapi.processor_t):
         postfix = ''
         ctx.out_mnem(20, postfix)
 
+    def _get_function(self, ea):
+        '''
+        fetch the function that contains the given address.
+        '''
+        # warning: O(#funcs) scan here, called in a tight loop (render operand).
+        for (start, end), f in self.function_ranges.items():
+            if start <= ea < end:
+                return f
+        raise KeyError(ea)
+
     @ida_entry
     def notify_out_operand(self, ctx, op):
         """
@@ -452,8 +465,11 @@ class wasm_processor_t(idaapi.processor_t):
         elif op.type == idaapi.o_reg:
             wtype = op.specval
             if wtype == WASM_LOCAL:
-                sreg = self.reg_names[op.reg]
-                ctx.out_register(sreg)
+                f = self._get_function(ctx.insn.ea)
+                if op.reg < f['type']['param_count']:
+                    ctx.out_register('$param%d' % (op.reg))
+                else:
+                    ctx.out_register('$local%d' % (op.reg))
                 return True
 
         elif op.type == idaapi.o_imm:
@@ -462,11 +478,6 @@ class wasm_processor_t(idaapi.processor_t):
                 # TODO: would like to make this a name that a user can re-name.
                 # might have to make this some kind of address.
                 ctx.out_keyword('$global%d' % (op.value))
-                return True
-
-            elif wtype == WASM_LOCAL:
-                # TODO: would like to make this a name that a user can re-name.
-                ctx.out_keyword('$var%d' % (op.value))
                 return True
 
             elif wtype == WASM_FUNC_INDEX:
@@ -782,6 +793,8 @@ class wasm_processor_t(idaapi.processor_t):
         self.functions = {}
         # map from virtual address to function object
         self.function_offsets = {}
+        # map from (va-start, va-end) to function object
+        self.function_ranges = {}
 
 
 def PROCESSOR_ENTRY():
