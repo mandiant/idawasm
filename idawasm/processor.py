@@ -757,15 +757,21 @@ class wasm_processor_t(idaapi.processor_t):
         '''
         functions = {}
         import_section = self._get_section(wasm.wasmtypes.SEC_IMPORT)
+        type_section = self._get_section(wasm.wasmtypes.SEC_TYPE)
+
         function_index = 0
         for entry in import_section.data.payload.entries:
             if entry.kind != idawasm.const.WASM_EXTERNAL_KIND_FUNCTION:
                 continue
 
+            type_index = entry.type.type
+            ftype = type_section.data.payload.entries[type_index]
+
             functions[function_index] = {
                 'index': function_index,
                 'module': entry.module_str.tobytes().decode('utf-8'),
                 'name': entry.field_str.tobytes().decode('utf-8'),
+                'type': struc_to_dict(ftype),
                 'imported': True,
                 # TODO: not sure if an import can be exported.
                 'exported': False,
