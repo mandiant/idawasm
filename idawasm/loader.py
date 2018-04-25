@@ -8,6 +8,7 @@ import idc
 import idaapi
 
 import idawasm.const
+from idawasm.common import *
 
 
 def accept_file(f, n):
@@ -19,40 +20,6 @@ def accept_file(f, n):
         return 0
 
     return 'WebAssembly v%d executable' % (0x1)
-
-
-def offset_of(struc, fieldname):
-    p = 0
-    dec_meta = struc.get_decoder_meta()
-    for field in struc.get_meta().fields:
-        if field.name != fieldname:
-            p += dec_meta['lengths'][field.name]
-        else:
-            return p
-    raise KeyError('field not found: ' + fieldname)
-
-
-def size_of(struc, fieldname=None):
-    if fieldname is not None:
-        # size of the given field, by name
-        dec_meta = struc.get_decoder_meta()
-        return dec_meta['lengths'][fieldname]
-    else:
-        # size of the entire given struct
-        return sum(struc.get_decoder_meta()['lengths'].values())
-
-
-import collections
-Field = collections.namedtuple('Field', ['offset', 'name', 'size'])
-
-def get_fields(struc):
-    p = 0
-    dec_meta = struc.get_decoder_meta()
-    for field in struc.get_meta().fields:
-        flen = dec_meta['lengths'][field.name]
-        if flen > 0:
-            yield Field(p, field.name, flen)
-        p += flen
 
 
 def MakeN(addr, size):
@@ -146,7 +113,6 @@ def load_globals_section(section, p):
         idc.MakeCode(pinit)
 
         pcur += size_of(body)
-
 
 
 SECTION_LOADERS = {
