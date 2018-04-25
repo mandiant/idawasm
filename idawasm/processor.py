@@ -435,7 +435,7 @@ class wasm_processor_t(idaapi.processor_t):
 
     def _get_function(self, ea):
         '''
-        fetch the function that contains the given address.
+        fetch the function object that contains the given address.
         '''
         # warning: O(#funcs) scan here, called in a tight loop (render operand).
         for (start, end), f in self.function_ranges.items():
@@ -487,21 +487,30 @@ class wasm_processor_t(idaapi.processor_t):
                 return True
 
             elif wtype == WASM_FUNC_INDEX:
-                ctx.out_keyword('func:')
+                f = self.functions[op.value]
+                if 'offset' in f:
+                    ctx.out_name_expr(op, f['offset'])
+                else:
+                    # TODO: link this to the import entry
+                    ctx.out_keyword(f['name'].encode('utf-8'))
+                return True
+
             elif wtype == WASM_TYPE_INDEX:
                 ctx.out_keyword('type:')
+                width = self.dt_to_width(op.dtype)
+                ctx.out_value(op, idaapi.OOFW_IMM | width)
+                return True
 
             elif wtype == WASM_ALIGN:
                 return False
 
-            width = self.dt_to_width(op.dtype)
-            ctx.out_value(op, idaapi.OOFW_IMM | width)
-            return True
+            else:
+                width = self.dt_to_width(op.dtype)
+                ctx.out_value(op, idaapi.OOFW_IMM | width)
+                return True
 
-        else:
-            return False
-
-        return True
+        # error case
+        return False
 
     @ida_entry
     def notify_out_insn(self, ctx):
@@ -513,6 +522,8 @@ class wasm_processor_t(idaapi.processor_t):
         '''
         fn = self.function_offsets.get(ctx.insn.ea, None)
         if fn is not None:
+            # use idaapi.rename_regvar and idaapi.find_regvar to resolve $local/$param names
+            # ref: https://reverseengineering.stackexchange.com/q/3038/17194
             proto = self._render_function_prototype(fn)
             ctx.gen_printf(0, proto + '\n')
 
