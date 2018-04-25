@@ -280,23 +280,13 @@ class wasm_processor_t(idaapi.processor_t):
     def notify_may_be_func(self, insn, state):
         """
         can a function start here?
-        the instruction is in 'insn'
-          arg: state -- autoanalysis phase
-            state == 0: creating functions
-                  == 1: creating chunks
-          returns: probability 0..100
+        Returns:
+          int: probability 0..100
         """
-        logger.debug('notify may be func')
-        # TODO(wb): parse functions section for function start addresses. nothing else.
-
-        if is_reg(insn.Op1, self.ireg_SP) and insn.Op2.type == o_displ and\
-            insn.Op2.phrase == self.ireg_SP and (insn.Op2.specval & self.FLo_INDIRECT) == 0:
-            # mov SP, SP+delta
-            if SIGNEXT(insn.Op2.addr, self.PTRSZ*8) < 0:
-                return 100
-            else:
-                return 0
-        return 10
+        if insn.ea in self.function_offsets:
+            return 100
+        else:
+            return 0
 
     def add_stkpnt(self, insn, pfn, v):
         logger.debug('add stkpnt')
@@ -890,6 +880,7 @@ class wasm_processor_t(idaapi.processor_t):
         pprint(self.functions)
         for function in self.functions.values():
             print(self._render_function_prototype(function))
+        self.function_offsets = {f['offset']: f for f in self.functions.values() if 'offset' in f}
 
     def __init__(self):
         # this is called prior to loading a binary, so don't read from the database here.
@@ -901,7 +892,10 @@ class wasm_processor_t(idaapi.processor_t):
         # these will be populated by `notify_newfile`
         self.buf = b''
         self.sections = []
+        # map from function index to function object
         self.functions = {}
+        # map from virtual address to function object
+        self.function_offsets = {}
 
 
 def PROCESSOR_ENTRY():
