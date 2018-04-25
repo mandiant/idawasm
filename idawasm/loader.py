@@ -69,7 +69,7 @@ def load_code_section(section, p):
         pcode = pcur + offset_of(body, 'code')
         idc.MakeName(pcode, fname)
         idc.MakeCode(pcode)
-        idc.MakeFunction(pcode)
+        idc.MakeFunction(pcode, pcode + size_of(body, 'code'))
 
         pcur += size_of(body)
 
