@@ -88,173 +88,53 @@ ida_entry = no_exceptions
 
 
 class wasm_processor_t(idaapi.processor_t):
-    # IDP id ( Numbers above 0x8000 are reserved for the third-party modules)
     id = PLFM_WASM
-
-    # Processor features
     flag = idaapi.PR_USE32 | idaapi.PR_RNAMESOK | idaapi.PRN_HEX | idaapi.PR_NO_SEGMOVE
-
-    # Number of bits in a byte for code segments (usually 8)
-    # IDA supports values up to 32 bits
     cnbits = 8
-
-    # Number of bits in a byte for non-code segments (usually 8)
-    # IDA supports values up to 32 bits
     dnbits = 8
-
-    # short processor names
-    # Each name should be shorter than 9 characters
     psnames = ['wasm']
-
-    # long processor names
-    # No restriction on name lengthes.
     plnames = ['WebAssembly']
-
-    # size of a segment register in bytes
     segreg_size = 0
-
-    # Array of typical code start sequences (optional)
-    # codestart = ['\x60\x00']  # 60 00 xx xx: MOVqw         SP, SP-delta
-
-    # Array of 'return' instruction opcodes (optional)
-    # retcodes = ['\x04\x00']   # 04 00: RET
-
-    # You should define 2 virtual segment registers for CS and DS.
-    # Let's call them rVcs and rVds.
-
-    # icode of the first instruction
-    instruc_start = 0
-
-    #
-    #      Size of long double (tbyte) for this processor
-    #      (meaningful only if ash.a_tbyte != NULL)
-    #
     tbyte_size = 0
-
-    # only one assembler is supported
     assembler = {
-        # flag
         'flag' : idaapi.ASH_HEXF3 | idaapi.AS_UNEQU | idaapi.AS_COLON | idaapi.ASB_BINF4 | idaapi.AS_N2CHR,
-
-        # user defined flags (local only for IDP)
-        # you may define and use your own bits
         'uflag' : 0,
-
-        # Assembler name (displayed in menus)
         'name': "WebAssembly assembler",
-
-        # org directive
         'origin': "org",
-
-        # end directive
         'end': "end",
-
-        # comment string (see also cmnt2)
         'cmnt': ";;",
-
-        # ASCII string delimiter
         'ascsep': "\"",
-
-        # ASCII char constant delimiter
         'accsep': "'",
-
-        # ASCII special chars (they can't appear in character and ascii constants)
         'esccodes': "\"'",
-
-        #
-        #      Data representation (db,dw,...):
-        #
-        # ASCII string directive
         'a_ascii': "db",
-
-        # byte directive
         'a_byte': "db",
-
-        # word directive
         'a_word': "dw",
-
-        # remove if not allowed
         'a_dword': "dd",
-
-        # remove if not allowed
         'a_qword': "dq",
-
-        # remove if not allowed
         'a_oword': "xmmword",
-
-        # float;  4bytes; remove if not allowed
         'a_float': "dd",
-
-        # double; 8bytes; NULL if not allowed
         'a_double': "dq",
-
-        # long double;    NULL if not allowed
         'a_tbyte': "dt",
-
-        # array keyword. the following
-        # sequences may appear:
-        #      #h - header
-        #      #d - size
-        #      #v - value
-        #      #s(b,w,l,q,f,d,o) - size specifiers
-        #                        for byte,word,
-        #                            dword,qword,
-        #                            float,double,oword
         'a_dups': "#d dup(#v)",
-
-        # uninitialized data directive (should include '%s' for the size of data)
         'a_bss': "%s dup ?",
-
-        # 'seg ' prefix (example: push seg seg001)
         'a_seg': "seg",
-
-        # current IP (instruction pointer) symbol in assembler
         'a_curip': "$",
-
-        # "public" name keyword. NULL-gen default, ""-do not generate
         'a_public': "public",
-
-        # "weak"   name keyword. NULL-gen default, ""-do not generate
         'a_weak': "weak",
-
-        # "extrn"  name keyword
         'a_extrn': "extrn",
-
-        # "comm" (communal variable)
         'a_comdef': "",
-
-        # "align" keyword
         'a_align': "align",
-
-        # Left and right braces used in complex expressions
         'lbrace': "(",
         'rbrace': ")",
-
-        # %  mod     assembler time operation
         'a_mod': "%",
-
-        # &  bit and assembler time operation
         'a_band': "&",
-
-        # |  bit or  assembler time operation
         'a_bor': "|",
-
-        # ^  bit xor assembler time operation
         'a_xor': "^",
-
-        # ~  bit not assembler time operation
         'a_bnot': "~",
-
-        # << shift left assembler time operation
         'a_shl': "<<",
-
-        # >> shift right assembler time operation
         'a_shr': ">>",
-
-        # size of type (format string)
         'a_sizeof_fmt': "size %s",
-    } # Assembler
-
+    }
 
     def dt_to_width(self, dt):
         """Returns OOFW_xxx flag given a dt_xxx"""
@@ -833,10 +713,9 @@ class wasm_processor_t(idaapi.processor_t):
         # Array of instructions
         # the index into this array apparently must match the `self.itype_*`.
         self.instruc = list(sorted(self.insns.values(), key=lambda i: i['id']))
-        self.instruc_end = len(self.instruc)
 
-        # Icode of return instruction. It is ok to give any of possible return
-        # instructions
+        self.instruc_start = 0
+        self.instruc_end = len(self.instruc)
         self.icode_return = self.itype_RETURN
 
     def init_registers(self):
