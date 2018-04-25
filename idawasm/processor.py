@@ -846,6 +846,35 @@ class wasm_processor_t(idaapi.processor_t):
 
         return functions
 
+    def _render_type(self, type_, name=None):
+        if name is None:
+            name = ''
+        else:
+            name = ' ' + name
+
+        params = []
+        if type_['param_count'] > 0:
+            for i, param in enumerate(type_['param_types']):
+                params.append(' (param $param%d %s)'  % (i, idawasm.const.WASM_TYPE_NAMES[param]))
+        sparam = ''.join(params)
+
+        if type_['return_count'] == 0:
+            sresult = ''
+        elif type_['return_count'] == 1:
+            sresult = ' (result %s)' % (idawasm.const.WASM_TYPE_NAMES[type_['return_type']])
+        else:
+            raise NotImplementedError('multiple return values')
+
+        return '(func%s%s%s)' % (name, sparam, sresult)
+
+    def _render_function_prototype(self, function):
+        if function.get('imported'):
+            return '(import "%s" "%s" %s)' % (function['module'],
+                                              function['name'],
+                                              self._render_type(function['type'], name='$import%d' % (function['index'])))
+        else:
+            return self._render_type(function['type'], name='$func%d' % (function['index']))
+
     def notify_newfile(self, filename):
         logger.info('new file: %s', filename)
 
@@ -859,6 +888,8 @@ class wasm_processor_t(idaapi.processor_t):
         self.functions = self._parse_functions()
         from pprint import pprint
         pprint(self.functions)
+        for function in self.functions.values():
+            print(self._render_function_prototype(function))
 
     def __init__(self):
         # this is called prior to loading a binary, so don't read from the database here.
