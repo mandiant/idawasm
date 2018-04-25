@@ -16,6 +16,7 @@
 #    - local vars and types
 #  - render trailing parenthesis
 #  - compute stack deltas
+#  - add exports for exports, start function
 
 '''
 
@@ -49,8 +50,10 @@ import hexdump
 
 import idc
 import idaapi
+import idautils
 
 import idawasm.const
+from idawasm.common import *
 
 
 logger = logging.getLogger(__name__)
@@ -717,11 +720,144 @@ class wasm_processor_t(idaapi.processor_t):
         # number of DS register
         self.reg_data_sreg = self.ireg_DS
 
+    def _get_section(self, section_id):
+        for i, section in enumerate(self.sections):
+            if i == 0:
+                continue
+
+            if section.data.id != section_id:
+                continue
+
+            return section
+
+        raise KeyError(section_id)
+
+    def _get_section_offset(self, section_id):
+        p = 0
+        for i, section in enumerate(self.sections):
+            if i == 0:
+                p += size_of(section.data)
+                continue
+
+            if section.data.id != section_id:
+                p += size_of(section.data)
+                continue
+
+            return p
+
+        raise KeyError(section_id)
+
+    def _parse_imported_functions(self):
+        '''
+        parse the import entries for functions.
+        useful for recovering function names.
+
+        Returns:
+          Dict[int, Dict[str, any]]: from function index to dict with keys `index`, `module`, and `name`.
+        '''
+        functions = {}
+        import_section = self._get_section(wasm.wasmtypes.SEC_IMPORT)
+        function_index = 0
+        for entry in import_section.data.payload.entries:
+            if entry.kind != idawasm.const.WASM_EXTERNAL_KIND_FUNCTION:
+                continue
+
+            functions[function_index] = {
+                'index': function_index,
+                'module': entry.module_str.tobytes().decode('utf-8'),
+                'name': entry.field_str.tobytes().decode('utf-8'),
+                'imported': True,
+                # TODO: not sure if an import can be exported.
+                'exported': False,
+            }
+
+            function_index += 1
+
+        return functions
+
+    def _parse_exported_functions(self):
+        '''
+        parse the export entries for functions.
+        useful for recovering function names.
+
+        Returns:
+          Dict[int, Dict[str, any]]: from function index to dict with keys `index` and `name`.
+        '''
+        functions = {}
+        export_section = self._get_section(wasm.wasmtypes.SEC_EXPORT)
+        for entry in export_section.data.payload.entries:
+            if entry.kind != idawasm.const.WASM_EXTERNAL_KIND_FUNCTION:
+                continue
+
+            functions[entry.index] = {
+                'index': entry.index,
+                'name': entry.field_str.tobytes().decode('utf-8'),
+                'exported': True,
+                # TODO: not sure if an export can be imported.
+                'imported': False,
+            }
+
+        return functions
+
+    def _parse_functions(self):
+        imported_functions = self._parse_imported_functions()
+        exported_functions = self._parse_exported_functions()
+
+        functions = dict(imported_functions)
+
+        function_section = self._get_section(wasm.wasmtypes.SEC_FUNCTION)
+        code_section = self._get_section(wasm.wasmtypes.SEC_CODE)
+        pcode_section = self._get_section_offset(wasm.wasmtypes.SEC_CODE)
+        type_section = self._get_section(wasm.wasmtypes.SEC_TYPE)
+
+        pbody = pcode_section + offset_of(code_section.data, 'payload') + offset_of(code_section.data.payload, 'bodies')
+        for i in range(code_section.data.payload.count):
+            function_index = len(imported_functions) + i
+            body = code_section.data.payload.bodies[i]
+            type_index = function_section.data.payload.types[i]
+            ftype = type_section.data.payload.entries[type_index]
+
+            functions[function_index] = {
+                'index': function_index,
+                'offset': pbody,
+                'type': struc_to_dict(ftype),
+                'exported': False,
+                'imported': False,
+            }
+
+            if function_index in exported_functions:
+                functions[function_index]['name'] = exported_functions[function_index]['name']
+                functions[function_index]['exported'] = True
+
+            pbody += size_of(body)
+
+        return functions
+
+    def notify_newfile(self, filename):
+        logger.info('new file: %s', filename)
+
+        buf = []
+        for ea in idautils.Segments():
+            # assume all the segments are contiguous, which is what our loader does
+            buf.append(idc.GetManyBytes(idc.SegStart(ea), idc.SegEnd(ea) - idc.SegStart(ea)))
+
+        self.buf = b''.join(buf)
+        self.sections = list(wasm.decode.decode_module(self.buf))
+        self.functions = self._parse_functions()
+        from pprint import pprint
+        pprint(self.functions)
+
     def __init__(self):
+        # this is called prior to loading a binary, so don't read from the database here.
         idaapi.processor_t.__init__(self)
         self.PTRSZ = 4 # Assume PTRSZ = 4 by default
         self.init_instructions()
         self.init_registers()
+
+        # these will be populated by `notify_newfile`
+        self.buf = b''
+        self.sections = []
+        self.functions = {}
 
 
 def PROCESSOR_ENTRY():
