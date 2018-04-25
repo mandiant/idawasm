@@ -315,9 +315,15 @@ class wasm_processor_t(idaapi.processor_t):
         self.sections = list(wasm.decode.decode_module(self.buf))
         self.functions = self._parse_functions()
         from pprint import pprint
+
         pprint(self.functions)
         for function in self.functions.values():
             print(self._render_function_prototype(function))
+
+            if 'offset' in function:
+                # TODO: overrides the loader name
+                idc.MakeName(function['offset'], function['name'].encode('utf-8'))
+
         self.function_offsets = {f['offset']: f for f in self.functions.values() if 'offset' in f}
         self.function_ranges = {
             (f['offset'], f['offset'] + f['size']): f for f in self.functions.values() if 'offset' in f
