@@ -252,18 +252,23 @@ class wasm_processor_t(idaapi.processor_t):
                 for j in range(locals_group.count):
                     local_types.append(ltype)
 
+            if function_index in exported_functions:
+                name = exported_functions[function_index]['name']
+                is_exported = True
+            else:
+                name = '$func%d' % (function_index)
+                is_exported = False
+
             functions[function_index] = {
                 'index': function_index,
+                'name': name,
                 'offset': pbody + offset_of(body, 'code'),
                 'type': struc_to_dict(ftype),
-                'exported': False,
+                'exported': is_exported,
                 'imported': False,
                 'local_types': local_types,
+                'size': size_of(body, 'code'),
             }
-
-            if function_index in exported_functions:
-                functions[function_index]['name'] = exported_functions[function_index]['name']
-                functions[function_index]['exported'] = True
 
             pbody += size_of(body)
 
