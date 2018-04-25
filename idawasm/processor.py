@@ -823,12 +823,19 @@ class wasm_processor_t(idaapi.processor_t):
             type_index = function_section.data.payload.types[i]
             ftype = type_section.data.payload.entries[type_index]
 
+            local_types = []
+            for locals_group in body.locals:
+                ltype = locals_group.type
+                for j in range(locals_group.count):
+                    local_types.append(ltype)
+
             functions[function_index] = {
                 'index': function_index,
                 'offset': pbody,
                 'type': struc_to_dict(ftype),
                 'exported': False,
                 'imported': False,
+                'local_types': local_types,
             }
 
             if function_index in exported_functions:
