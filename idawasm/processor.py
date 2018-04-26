@@ -1,22 +1,23 @@
 # TODO:
 #  - parse items up front
-#    - all sections
+#    x all sections
 #    - blocks and branch targets
-#  - use $paramN for params, based on function prototype
+#  x use $paramN for params, based on function prototype
 #  - mark branch code xrefs during emu
 #  - add names for globals
 #  - mark data xref to memory load/store
 #  - mark data xref to global load/store
 #  - create functions
 #  - enable global var renaming
-#  - show function prototype and local var layout at function start
-#    - leading parenthesis
-#    - fn name
-#    - arguments and types
-#    - local vars and types
+#  x show function prototype and local var layout at function start
+#    x leading parenthesis
+#    x fn name
+#    x arguments and types
+#    x local vars and types
 #  - render trailing parenthesis
 #  - compute stack deltas
-#  - add exports for exports, start function
+#  x add entry point for exports
+#  - add entry point for start function
 
 '''
 
@@ -67,6 +68,7 @@ WASM_FUNC_INDEX = idaapi.o_idpspec2
 WASM_TYPE_INDEX = idaapi.o_idpspec3
 WASM_BLOCK = idaapi.o_idpspec4
 WASM_ALIGN = idaapi.o_idpspec5
+
 
 def no_exceptions(f):
     '''
@@ -323,6 +325,13 @@ class wasm_processor_t(idaapi.processor_t):
             if 'offset' in function:
                 # TODO: overrides the loader name
                 idc.MakeName(function['offset'], function['name'].encode('utf-8'))
+
+            if function.get('exported'):
+                # TODO: this should really be done in the loader.
+                # though, at the moment, we do a lot more analysis here in the processor.
+                idc.add_entry(function['index'], function['offset'], function['name'].encode('utf-8'), True)
+
+            # TODO: idc.add_entry for the start routine. need an example of this.
 
         self.function_offsets = {f['offset']: f for f in self.functions.values() if 'offset' in f}
         self.function_ranges = {
