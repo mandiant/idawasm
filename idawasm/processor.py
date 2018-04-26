@@ -1,9 +1,9 @@
 # TODO:
-#  - parse items up front
+#  x parse items up front
 #    x all sections
-#    - blocks and branch targets
+#    x blocks and branch targets
 #  x use $paramN for params, based on function prototype
-#  - mark branch code xrefs during emu
+#  x mark branch code xrefs during emu
 #  x add names for globals
 #  - mark data xref to memory load/store
 #  - mark data xref to global load/store
@@ -650,7 +650,8 @@ class wasm_processor_t(idaapi.processor_t):
         """
         if op.type == WASM_BLOCK:
             if op.value == 0xFFFFFFC0:  # VarInt7 for 0x40
-                ctx.out_keyword('type:empty')
+                # block has empty type
+                pass
             else:
                 # ref: https://webassembly.github.io/spec/core/binary/types.html#binary-valtype
                 # TODO(wb): untested!
@@ -696,7 +697,10 @@ class wasm_processor_t(idaapi.processor_t):
                 return True
 
             elif wtype == WASM_ALIGN:
-                return False
+                ctx.out_keyword('align:')
+                width = self.dt_to_width(op.dtype)
+                ctx.out_value(op, idaapi.OOFW_IMM | width)
+                return True
 
             else:
                 width = self.dt_to_width(op.dtype)
