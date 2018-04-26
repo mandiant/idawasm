@@ -18,6 +18,8 @@
 #  - compute stack deltas
 #  x add entry point for exports
 #  - add entry point for start function
+#  - parse data section, and map at the appropriate offsets. use data segment???
+#  - label block start/end with names
 
 '''
 
@@ -535,10 +537,63 @@ class wasm_processor_t(idaapi.processor_t):
             # itype_UNREACHABLE, itype_RETURN
             # noflow
             pass
-        elif insn.itype in (self.itype_BR, self.itype_BR_TABLE):
+
+        elif insn.itype in (self.itype_BR, ) and insn.ea in self.branch_targets:
             # noflow
             pass
+
+            # branch target
+            targets = self.branch_targets[insn.ea]
+            target_block = targets[insn.Op1.value]
+            target_va = target_block['end_offset']
+            idaapi.add_cref(insn.ea, target_va, idaapi.fl_JF)
+
+        elif insn.itype in (self.itype_BR_TABLE, ):
+            # noflow
+            raise NotImplementedError('br table')
+
+        elif insn.itype in (self.itype_BR_IF, ) and insn.ea in self.branch_targets:
+            # fallthrough flow
+            idaapi.add_cref(insn.ea, insn.ea + insn.size, idaapi.fl_F)
+
+            # branch target
+            targets = self.branch_targets[insn.ea]
+            target_block = targets[insn.Op1.value]
+            target_va = target_block['end_offset']
+            idaapi.add_cref(insn.ea, target_va, idaapi.fl_JF)
+
+        elif insn.itype in (self.itype_END, ) and insn.ea in self.branch_targets:
+            targets = self.branch_targets[insn.ea]
+            block = targets['block']
+            if block['type'] == 'loop':
+                # end of loop
+
+                # noflow
+
+                # branch back to top of loop
+                target_va = block['offset']
+                idaapi.add_cref(insn.ea, target_va, idaapi.fl_JF)
+
+            elif block['type'] == 'if':
+                # end of if
+                print(hex(insn.ea))
+                raise NotImplementedError('if')
+
+            elif block['type'] == 'block':
+                # end of block
+                # fallthrough flow
+                idaapi.add_cref(insn.ea, insn.ea + insn.size, idaapi.fl_F)
+
+            elif block['type'] == 'function':
+                # end of function
+                # noflow
+                pass
+
+            else:
+                raise RuntimeError('unexpected block type: ' + block['type'])
+
         else:
+            # fallthrough flow
             idaapi.add_cref(insn.ea, insn.ea + insn.size, idaapi.fl_F)
 
         return 1
