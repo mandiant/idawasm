@@ -19,7 +19,8 @@
 #  x add entry point for exports
 #  - add entry point for start function
 #  - parse data section, and map at the appropriate offsets. use data segment???
-#  - label block start/end with names
+#  x label block start/end with names
+#  - merge orphan end block with prior branch insns
 
 '''
 
@@ -737,6 +738,15 @@ class wasm_processor_t(idaapi.processor_t):
             ctx.out_symbol(',')
             ctx.out_char(' ')
             ctx.out_one_operand(i)
+
+        if ctx.insn.itype in (self.itype_BLOCK, self.itype_LOOP, self.itype_END) and ctx.insn.ea in self.branch_targets:
+            targets = self.branch_targets[ctx.insn.ea]
+            block = targets['block']
+            if block['type'] in ('block', 'loop'):
+                ctx.out_tagon(idaapi.COLOR_UNAME)
+                for c in ("$" + block['type'] + str(block['index'])):
+                    ctx.out_char(c)
+                ctx.out_tagoff(idaapi.COLOR_UNAME)
 
         ctx.set_gen_cmt()
         ctx.flush_outbuf()
