@@ -172,6 +172,107 @@ class wasm_processor_t(idaapi.processor_t):
 
         raise KeyError(section_id)
 
+    def _compute_function_branch_targets(self, offset, code):
+        '''
+        compute branch targets for the given code segment.
+
+        we can do it in a single pass:
+        scan instructions, tracking new blocks, and maintaining a stack of nested blocks.
+        when we hit a branch instruction, use the stack to resolve the branch target.
+        the branch target will always come from the enclosing scope.
+
+        Args:
+          offset (int): offset of the given code segment.
+          code (bytes): raw bytecode.
+
+        Returns:
+          Dict[int, Dict[int, int]]: map from instruction addresses to map from relative depth to branch target address.
+        '''
+        # map from virtual address to map from relative depth to virtual address
+        branch_targets = {}
+        # map from block index to block instance, with fields including `offset` and `depth`
+        blocks = {}
+        # stack of block indexes
+        block_stack = []
+        p = offset
+
+        for bc in wasm.decode.decode_bytecode(code):
+            if bc.op.id in {wasm.opcodes.OP_BLOCK, wasm.opcodes.OP_LOOP, wasm.opcodes.OP_IF}:
+                # enter a new block, so capture info, and push it onto the current depth stack
+                block_index = len(blocks)
+                block = {
+                    'index': block_index,
+                    'offset': p,
+                    'depth': len(block_stack),
+                    'type': {
+                        wasm.opcodes.OP_BLOCK: 'block',
+                        wasm.opcodes.OP_LOOP: 'loop',
+                        wasm.opcodes.OP_IF: 'if',
+                    }[bc.op.id],
+                }
+                blocks[block_index] = block
+                block_stack.insert(0, block_index)
+                branch_targets[p] = {
+                    # reference to block that is starting
+                    'block': block
+                }
+
+            elif bc.op.id in {wasm.opcodes.OP_END}:
+                if len(block_stack) == 0:
+                    # end of function
+                    branch_targets[p] = {
+                        'block': {
+                            'type': 'function',
+                            'offset': offset,     # start of function
+                            'end_offset': p,      # end of function
+                            'depth': 0,           # top level always has depth 0
+                        }
+                    }
+                    break
+
+                # leaving a block, so pop from the depth stack
+                block_index = block_stack.pop(0)
+                block = blocks[block_index]
+                block['end_offset'] = p + bc.len
+                branch_targets[p] = {
+                    # reference to block that is ending
+                    'block': block
+                }
+
+            elif bc.op.id in {wasm.opcodes.OP_BR, wasm.opcodes.OP_BR_IF}:
+                block_index = block_stack[bc.imm.relative_depth]
+                block = blocks[block_index]
+                branch_targets[p] = {
+                    bc.imm.relative_depth: block
+                }
+
+            elif bc.op.id in {wasm.opcodes.OP_ELSE}:
+                # TODO: not exactly sure of the semantics here
+                raise NotImplementedError('else')
+
+            elif bc.op.id in {wasm.opcodes.OP_BR_TABLE}:
+                # TODO: not exactly sure what one of these looks like yet.
+                raise NotImplementedError('br table')
+                # probably will populate `branch_targets` with multiple entries
+
+            p += bc.len
+
+        return branch_targets
+
+    def _compute_branch_targets(self):
+        branch_targets = {}
+
+        code_section = self._get_section(wasm.wasmtypes.SEC_CODE)
+        pcode_section = self._get_section_offset(wasm.wasmtypes.SEC_CODE)
+
+        pbody = pcode_section + offset_of(code_section.data, 'payload') + offset_of(code_section.data.payload, 'bodies')
+        for body in code_section.data.payload.bodies:
+            pcode = pbody + offset_of(body, 'code')
+            branch_targets.update(self._compute_function_branch_targets(pcode, body.code))
+            pbody += size_of(body)
+
+        return branch_targets
+
     def _parse_globals(self):
         '''
         parse the global entries.
@@ -190,6 +291,7 @@ class wasm_processor_t(idaapi.processor_t):
             pinit = pcur + offset_of(body, 'init')
             ctype = idawasm.const.WASM_TYPE_NAMES[body.type.content_type]
             globals_[i] = {
+                'index': i,
                 'offset': pinit,
                 'type': ctype,
             }
@@ -332,6 +434,7 @@ class wasm_processor_t(idaapi.processor_t):
     def notify_newfile(self, filename):
         logger.info('new file: %s', filename)
 
+        logger.info('parsing sections')
         buf = []
         for ea in idautils.Segments():
             # assume all the segments are contiguous, which is what our loader does
@@ -339,13 +442,11 @@ class wasm_processor_t(idaapi.processor_t):
 
         self.buf = b''.join(buf)
         self.sections = list(wasm.decode.decode_module(self.buf))
+
+        logger.info('parsing functions')
         self.functions = self._parse_functions()
-        from pprint import pprint
 
-        pprint(self.functions)
         for function in self.functions.values():
-            print(self._render_function_prototype(function))
-
             if 'offset' in function:
                 # TODO: overrides the loader name
                 idc.MakeName(function['offset'], function['name'].encode('utf-8'))
@@ -362,7 +463,11 @@ class wasm_processor_t(idaapi.processor_t):
             (f['offset'], f['offset'] + f['size']): f for f in self.functions.values() if 'offset' in f
         }
 
+        logger.info('parsing globals')
         self.globals = self._parse_globals()
+
+        logger.info('computing branch targets')
+        self.branch_targets = self._compute_branch_targets()
 
     @ida_entry
     def notify_get_autocmt(self, insn):
@@ -848,6 +953,8 @@ class wasm_processor_t(idaapi.processor_t):
         self.function_ranges = {}
         # map from global index to global object
         self.globals = {}
+        # map from va to map from relative depth to va
+        self.branch_targets = {}
 
 
 def PROCESSOR_ENTRY():
