@@ -4,11 +4,11 @@
 #    - blocks and branch targets
 #  x use $paramN for params, based on function prototype
 #  - mark branch code xrefs during emu
-#  - add names for globals
+#  x add names for globals
 #  - mark data xref to memory load/store
 #  - mark data xref to global load/store
-#  - create functions
-#  - enable global var renaming
+#  x create functions
+#  x enable global var renaming
 #  x show function prototype and local var layout at function start
 #    x leading parenthesis
 #    x fn name
@@ -171,6 +171,30 @@ class wasm_processor_t(idaapi.processor_t):
             return p
 
         raise KeyError(section_id)
+
+    def _parse_globals(self):
+        '''
+        parse the global entries.
+
+        Returns:
+          Dict[int, Dict[str, any]]: from global index to dict with keys `offset` and `type`.
+        '''
+        globals_ = {}
+        global_section = self._get_section(wasm.wasmtypes.SEC_GLOBAL)
+        pglobal_section = self._get_section_offset(wasm.wasmtypes.SEC_GLOBAL)
+
+        ppayload = pglobal_section + offset_of(global_section.data, 'payload')
+        pglobals = ppayload + offset_of(global_section.data.payload, 'globals')
+        pcur = pglobals
+        for i, body in enumerate(global_section.data.payload.globals):
+            pinit = pcur + offset_of(body, 'init')
+            ctype = idawasm.const.WASM_TYPE_NAMES[body.type.content_type]
+            globals_[i] = {
+                'offset': pinit,
+                'type': ctype,
+            }
+            pcur += size_of(body)
+        return globals_
 
     def _parse_imported_functions(self):
         '''
@@ -338,6 +362,8 @@ class wasm_processor_t(idaapi.processor_t):
             (f['offset'], f['offset'] + f['size']): f for f in self.functions.values() if 'offset' in f
         }
 
+        self.globals = self._parse_globals()
+
     @ida_entry
     def notify_get_autocmt(self, insn):
         """
@@ -490,9 +516,8 @@ class wasm_processor_t(idaapi.processor_t):
         elif op.type == idaapi.o_imm:
             wtype = op.specval
             if wtype == WASM_GLOBAL:
-                # TODO: would like to make this a name that a user can re-name.
-                # might have to make this some kind of address.
-                ctx.out_keyword('$global%d' % (op.value))
+                g = self.globals[op.value]
+                ctx.out_name_expr(op, g['offset'])
                 return True
 
             elif wtype == WASM_FUNC_INDEX:
@@ -821,6 +846,8 @@ class wasm_processor_t(idaapi.processor_t):
         self.function_offsets = {}
         # map from (va-start, va-end) to function object
         self.function_ranges = {}
+        # map from global index to global object
+        self.globals = {}
 
 
 def PROCESSOR_ENTRY():
