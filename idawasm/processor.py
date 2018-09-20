@@ -519,12 +519,14 @@ class wasm_processor_t(idaapi.processor_t):
 
     @ida_entry
     def notify_get_autocmt(self, insn):
-        """
-        Get instruction comment. 'insn' describes the instruction in question
-        @return: None or the comment string
-        """
+        '''
+        fetch instruction auto-comment.
+
+        Returns:
+          Union[str, None]: the comment string, or None.
+        '''
         if 'cmt' in self.instruc[insn.itype]:
-          return self.instruc[insn.itype]['cmt'](insn)
+            return self.instruc[insn.itype]['cmt']
 
     @ida_entry
     def notify_may_be_func(self, insn, state):
@@ -995,7 +997,7 @@ class wasm_processor_t(idaapi.processor_t):
                 # danger: this must be an ASCII-encoded byte string, *not* unicode!
                 'name': op.mnemonic.encode('ascii'),
                 'feature': op.flags,
-                'cmd': None,          # TODO(wb): add cmt help
+                'cmt': idawasm.const.WASM_OPCODE_DESCRIPTIONS.get(op.id),
             }
             clean_mnem = op.mnemonic.encode('ascii').replace('.', '_').replace('/', '_').upper()
             # the itype constant value must be contiguous, which sucks, because its not the op.id value.
