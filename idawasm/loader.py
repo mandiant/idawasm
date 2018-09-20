@@ -1,3 +1,4 @@
+import os
 import struct
 
 import wasm
@@ -17,6 +18,7 @@ def accept_file(f, n):
         return 0
 
     if struct.unpack('<I', f.read(4))[0] != 0x1:
+        # only support v1 right now
         return 0
 
     return 'WebAssembly v%d executable' % (0x1)
@@ -44,61 +46,62 @@ def get_section(sections, section_id):
         return section
 
 
-def load_code_section(section, p):
-    idc.MakeName(p + offset_of(section.data, 'id'), 'code_id')
-    MakeN(p + offset_of(section.data, 'id'), size_of(section.data, 'id'))
+def is_struc(o):
+    return  '.GeneratedStructureData' in str(type(o))
 
-    ppayload = p + offset_of(section.data, 'payload')
-    idc.MakeName(ppayload + offset_of(section.data.payload, 'count'), 'function_count')
-    MakeN(ppayload + offset_of(section.data.payload, 'count'), size_of(section.data.payload, 'count'))
 
-    pbodies = ppayload + offset_of(section.data.payload, 'bodies')
-    pcur = pbodies
-    for i, body in enumerate(section.data.payload.bodies):
-        fname = 'function_%X' % (i)
-        idc.MakeName(pcur, fname + '_meta')
+def format_value(name, value):
+    if isinstance(value, int):
+        # a heuristic to detect fields that contain a type value
+        if 'type' in name or 'form' in name:
+            try:
+                return idawasm.const.WASM_TYPE_NAMES[value]
+            except KeyError:
+                return hex(value)
+        else:
+            return hex(value)
+    elif isinstance(value, list):
+        return '[' + ', '.join([format_value(name, v) for v in value]) + ']'
+    elif isinstance(value, memoryview) and 'str' in name:
+        try:
+            return value.tobytes().decode('utf-8')
+        except UnicodeDecodeError:
+            return ''
+    else:
+        return ''
 
-        idc.MakeName(pcur + offset_of(body, 'local_count'), fname + '_local_count')
-        MakeN(pcur + offset_of(body, 'local_count'), size_of(body, 'local_count'))
 
-        if size_of(body, 'locals') > 0:
-            idc.MakeName(pcur + offset_of(body, 'locals'), fname + '_locals')
-            for j in range(size_of(body, 'locals')):
-                idc.MakeByte(pcur + offset_of(body, 'locals') + j)
+def load_struc(struc, p, path):
+    for field in get_fields(struc):
+        name = path + ':' + field.name
+        if is_struc(field.value):
+            p = load_struc(field.value, p, name)
+        elif isinstance(field.value, list) and len(field.value) > 0 and is_struc(field.value[0]):
+            for i, v in enumerate(field.value):
+                p = load_struc(v, p, name + ':' + str(i))
+        else:
+            idc.ExtLinA(p, 0, name)
+            if isinstance(field.value, int):
+                MakeN(p, field.size)
+            idc.MakeComm(p, format_value(name, field.value).encode('utf-8'))
+            p += field.size
 
-        pcode = pcur + offset_of(body, 'code')
-        idc.MakeName(pcode, fname)
-        idc.MakeCode(pcode)
-        idc.MakeFunction(pcode, pcode + size_of(body, 'code'))
+    return p
 
-        pcur += size_of(body)
+
+def load_section(section, p):
+    load_struc(section.data, p, 'sections:' + str(section.data.id))
 
 
 def load_globals_section(section, p):
-    idc.MakeName(p + offset_of(section.data, 'id'), 'globals_id')
-    MakeN(p + offset_of(section.data, 'id'), size_of(section.data, 'id'))
-
-    idc.MakeName(p + offset_of(section.data, 'payload_len'), 'globals_size')
-    MakeN(p + offset_of(section.data, 'payload_len'), size_of(section.data, 'payload_len'))
-
+    '''
+    specialized handler for the globals section to mark the initializer as code.
+    '''
     ppayload = p + offset_of(section.data, 'payload')
-    idc.MakeName(ppayload + offset_of(section.data.payload, 'count'), 'globals_count')
-    MakeN(ppayload + offset_of(section.data.payload, 'count'), size_of(section.data.payload, 'count'))
-
     pglobals = ppayload + offset_of(section.data.payload, 'globals')
     pcur = pglobals
     for i, body in enumerate(section.data.payload.globals):
         gname = 'global_%X' % (i)
-
-        ptype = pcur + offset_of(body, 'type')
-        idc.MakeName(ptype + offset_of(body.type, 'content_type'), gname + '_content_type')
-        MakeN(ptype + offset_of(body.type, 'content_type'), size_of(body.type, 'content_type'))
-        ctype = idawasm.const.WASM_TYPE_NAMES[body.type.content_type]
-        idaapi.append_cmt(ptype + offset_of(body.type, 'content_type'), ctype, False)
-
-        idc.MakeName(ptype + offset_of(body.type, 'mutability'), gname + '_mutability')
-        MakeN(ptype+ offset_of(body.type, 'mutability'), size_of(body.type, 'mutability'))
-
         # we need a target that people can rename.
         # so lets map `global_N` to the init expr field.
         # this will look like:
@@ -115,9 +118,35 @@ def load_globals_section(section, p):
         pcur += size_of(body)
 
 
+def load_elements_section(section, p):
+    '''
+    specialized handler for the elements section to mark the offset initializer as code.
+    '''
+    ppayload = p + offset_of(section.data, 'payload')
+    pentries = ppayload + offset_of(section.data.payload, 'entries')
+    pcur = pentries
+    for i, body in enumerate(section.data.payload.entries):
+        idc.MakeCode(pcur + offset_of(body, 'offset'))
+        pcur += size_of(body)
+
+
+def load_data_section(section, p):
+    '''
+    specialized handler for the data section to mark the offset initializer as code.
+    '''
+    ppayload = p + offset_of(section.data, 'payload')
+    pentries = ppayload + offset_of(section.data.payload, 'entries')
+    pcur = pentries
+    for i, body in enumerate(section.data.payload.entries):
+        idc.MakeCode(pcur + offset_of(body, 'offset'))
+        pcur += size_of(body)
+
+
+
 SECTION_LOADERS = {
-    wasm.wasmtypes.SEC_CODE: load_code_section,
     wasm.wasmtypes.SEC_GLOBAL: load_globals_section,
+    wasm.wasmtypes.SEC_ELEMENT: load_elements_section,
+    wasm.wasmtypes.SEC_DATA: load_data_section,
 }
 
 
@@ -183,6 +212,8 @@ def load_file(f, neflags, format):
             loader = SECTION_LOADERS.get(section.data.id)
             if loader is not None:
                 loader(section, p)
+
+            load_section(section, p)
 
         p += slen
 
