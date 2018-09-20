@@ -477,6 +477,20 @@ class wasm_processor_t(idaapi.processor_t):
 
     @ida_entry
     def notify_newfile(self, filename):
+        '''
+        handle loading a new file.
+
+        the processor object may not be re-created, so we do our initializiation here.
+        initialize the following fields:
+
+          - self.buf
+          - self.sections
+          - self.functions
+          - self.function_offsets
+          - self.function_ranges
+          - self.globals
+          - self.branch_targets
+        '''
         logger.info('new file: %s', filename)
 
         logger.info('parsing sections')
@@ -530,56 +544,25 @@ class wasm_processor_t(idaapi.processor_t):
 
     @ida_entry
     def notify_may_be_func(self, insn, state):
-        """
-        can a function start here?
+        '''
+        can a function start at the given instruction?
+
         Returns:
-          int: probability 0..100
-        """
+          int: 100 if a function starts here, zero otherwise.
+        '''
         if insn.ea in self.function_offsets:
             return 100
         else:
             return 0
 
-    def add_stkpnt(self, insn, pfn, v):
-        logger.debug('add stkpnt')
-        if pfn:
-            end = insn.ea + insn.size
-            if not is_fixed_spd(end):
-                ida_frame.add_auto_stkpnt(pfn, end, v)
-
-    def trace_sp(self, insn):
-        """
-        Trace the value of the SP and create an SP change point if the current
-        instruction modifies the SP.
-        """
-        logger.debug('trace sp')
-        pfn = get_func(insn.ea)
-        if not pfn:
-            return
-        if is_reg(insn.Op1, self.ireg_SP) and insn.itype in [self.itype_MOVbw, self.itype_MOVww,
-                                            self.itype_MOVdw, self.itype_MOVqw, self.itype_MOVbd,
-                                            self.itype_MOVwd, self.itype_MOVdd, self.itype_MOVqd,
-                                            self.itype_MOVsnw, self.itype_MOVsnd, self.itype_MOVqq]:
-            # MOVqw         SP, SP-0x30
-            # MOVqw         SP, SP+0x30
-            if insn.Op2.type == o_displ and insn.Op2.phrase == self.ireg_SP and (insn.Op2.specval & self.FLo_INDIRECT) == 0:
-                spofs = SIGNEXT(insn.Op2.addr, self.PTRSZ*8)
-                self.add_stkpnt(insn, pfn, spofs)
-        elif insn.itype in [self.itype_PUSH, self.itype_PUSHn]:
-            spofs = dt_to_bits(insn.Op1.dtype) // 8
-            self.add_stkpnt(insn, pfn, -spofs)
-        elif insn.itype in [self.itype_POP, self.itype_POPn]:
-            spofs = dt_to_bits(insn.Op1.dtype) // 8
-            self.add_stkpnt(insn, pfn, spofs)
-
     @ida_entry
     def notify_emu(self, insn):
-        """
+        '''
         Emulate instruction, create cross-references, plan to analyze
         subsequent instructions, modify flags etc. Upon entrance to this function
         all information about the instruction is in 'insn' structure.
         If zero is returned, the kernel will delete the instruction.
-        """
+        '''
         # add fall-through flows
         if insn.get_canon_feature() & wasm.opcodes.INSN_NO_FLOW:
             # itype_UNREACHABLE, itype_RETURN
@@ -643,31 +626,6 @@ class wasm_processor_t(idaapi.processor_t):
         else:
             # fallthrough flow
             idaapi.add_cref(insn.ea, insn.ea + insn.size, idaapi.fl_F)
-
-        return 1
-
-        aux = self.get_auxpref(insn)
-        Feature = insn.get_canon_feature()
-
-        if Feature & CF_JUMP:
-            remember_problem(PR_JUMP, insn.ea)
-
-        # is it an unconditional jump?
-        uncond_jmp = insn.itype in [self.itype_JMP8, self.itype_JMP] and (aux & (self.FLa_NCS|self.FLa_CS)) == 0
-
-        # add flow
-        flow = (Feature & CF_STOP == 0) and not uncond_jmp
-        if flow:
-            add_cref(insn.ea, insn.ea + insn.size, fl_F)
-
-        # trace the stack pointer if:
-        #   - it is the second analysis pass
-        #   - the stack pointer tracing is allowed
-        if may_trace_sp():
-            if flow:
-                self.trace_sp(insn) # trace modification of SP register
-            else:
-                recalc_spd(insn.ea) # recalculate SP register for the next insn
 
         return 1
 
