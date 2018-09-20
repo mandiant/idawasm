@@ -41,28 +41,30 @@ memory: use offsets into memory section.
 
 global variables: use offsets into globals section.
 '''
-
+# stdlib
 import sys
 import struct
 import logging
 import functools
 
+# from pip
 import wasm
 import wasm.decode
 import wasm.wasmtypes
 import hexdump
 
+# from IDA
 import idc
 import idaapi
 import idautils
 
+# from this project
 import idawasm.const
 from idawasm.common import *
 
 
 logger = logging.getLogger(__name__)
 
-PLFM_WASM = 0x8069
 
 # these are wasm-specific operand types
 WASM_LOCAL = idaapi.o_idpspec0
@@ -75,8 +77,18 @@ WASM_ALIGN = idaapi.o_idpspec5
 
 def no_exceptions(f):
     '''
-    decorator that catches and logs any exceptoins.
+    decorator that catches and logs any exceptions.
     the exceptions are swallowed, and `0` is returned.
+
+    this is useful for routines that IDA invokes, as IDA bails on exceptions.
+
+    Example::
+
+        @no_exceptions
+        def definitely_doesnt_work():
+            raise ZeroDivisionError()
+
+        assert definitely_doesnt_work() == 0
     '''
     @functools.wraps(f)
     def wrapper(*args, **kwargs):
@@ -93,7 +105,9 @@ ida_entry = no_exceptions
 
 
 class wasm_processor_t(idaapi.processor_t):
-    id = PLFM_WASM
+    # processor ID for the wasm disassembler.
+    # I made this number up.
+    id = 0x8069
     flag = idaapi.PR_USE32 | idaapi.PR_RNAMESOK | idaapi.PRN_HEX | idaapi.PR_NO_SEGMOVE
     cnbits = 8
     dnbits = 8
@@ -142,13 +156,28 @@ class wasm_processor_t(idaapi.processor_t):
     }
 
     def dt_to_width(self, dt):
-        """Returns OOFW_xxx flag given a dt_xxx"""
-        if   dt == idaapi.dt_byte:  return idaapi.OOFW_8
-        elif dt == idaapi.dt_word:  return idaapi.OOFW_16
-        elif dt == idaapi.dt_dword: return idaapi.OOFW_32
-        elif dt == idaapi.dt_qword: return idaapi.OOFW_64
+        '''
+        returns OOFW_xxx flag given a dt_xxx
+        '''
+        if    dt == idaapi.dt_byte:  return idaapi.OOFW_8
+        elif  dt == idaapi.dt_word:  return idaapi.OOFW_16
+        elif  dt == idaapi.dt_dword: return idaapi.OOFW_32
+        elif  dt == idaapi.dt_qword: return idaapi.OOFW_64
+        else: raise ValueError('unexpected dt: ' + str(dt))
 
     def _get_section(self, section_id):
+        '''
+        fetch the section with the given id.
+
+        Args:
+          section_id (int): the section id.
+
+        Returns:
+          wasm.Structure: the section.
+
+        Raises:
+          KeyError: if the section is not found.
+        '''
         for i, section in enumerate(self.sections):
             if i == 0:
                 continue
@@ -161,6 +190,18 @@ class wasm_processor_t(idaapi.processor_t):
         raise KeyError(section_id)
 
     def _get_section_offset(self, section_id):
+        '''
+        fetch the file offset of the given section.
+
+        Args:
+          section_id (int): the section id.
+
+        Returns:
+          int: the offset of the section.
+
+        Raises:
+          KeyError: if the section is not found.
+        '''
         p = 0
         for i, section in enumerate(self.sections):
             if i == 0:
@@ -434,6 +475,7 @@ class wasm_processor_t(idaapi.processor_t):
         else:
             return self._render_type(function['type'], name='$func%d' % (function['index']))
 
+    @ida_entry
     def notify_newfile(self, filename):
         logger.info('new file: %s', filename)
 
@@ -451,7 +493,7 @@ class wasm_processor_t(idaapi.processor_t):
 
         for function in self.functions.values():
             if 'offset' in function:
-                # TODO: overrides the loader name
+                # TODO: overrides the name set by the wasm loader.
                 idc.MakeName(function['offset'], function['name'].encode('utf-8'))
 
             if function.get('exported'):
@@ -461,7 +503,10 @@ class wasm_processor_t(idaapi.processor_t):
 
             # TODO: idc.add_entry for the start routine. need an example of this.
 
+        # map from function offset to function object
         self.function_offsets = {f['offset']: f for f in self.functions.values() if 'offset' in f}
+
+        # map from (function start, function end) to function object
         self.function_ranges = {
             (f['offset'], f['offset'] + f['size']): f for f in self.functions.values() if 'offset' in f
         }
