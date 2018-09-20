@@ -510,6 +510,9 @@ class wasm_processor_t(idaapi.processor_t):
                 # TODO: overrides the name set by the wasm loader.
                 idc.MakeName(function['offset'], function['name'].encode('utf-8'))
 
+                idc.MakeCode(function['offset'])
+                idc.MakeFunction(function['offset'], function['offset'] + function['size'])
+
             if function.get('exported'):
                 # TODO: this should really be done in the loader.
                 # though, at the moment, we do a lot more analysis here in the processor.
