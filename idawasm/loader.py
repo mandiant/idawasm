@@ -13,6 +13,16 @@ from idawasm.common import *
 
 
 def accept_file(f, n):
+    '''
+    return the name of the format, if it looks like a WebAssembly module, or 0 on unsupported.
+
+    Args:
+      f (file): the file to inspect.
+      n (any): unused.
+
+    Returns:
+      Union[str, int]: str if supported, 0 if unsupported.
+    '''
     f.seek(0)
     if f.read(4) != b'\x00asm':
         return 0
@@ -25,6 +35,13 @@ def accept_file(f, n):
 
 
 def MakeN(addr, size):
+    '''
+    Make a integer with the given size at the given address.
+
+    Args:
+      addr (int): effective address.
+      size (int): the size of the integer, one of 1, 2, 4, or 8.
+    '''
     if size == 1:
         idc.MakeByte(addr)
     elif size == 2:
@@ -36,6 +53,9 @@ def MakeN(addr, size):
 
 
 def get_section(sections, section_id):
+    '''
+    given a sequence of sections, return the section with the given id.
+    '''
     for i, section in enumerate(sections):
         if i == 0:
             continue
@@ -47,10 +67,47 @@ def get_section(sections, section_id):
 
 
 def is_struc(o):
+    '''
+    does the given object look like a structure from the wasm library.
+
+    this is super ugly, but since the wasm library creates types on demand, i'm not sure how else to test for them.
+
+    Example::
+
+        assert is_struc(section.data) == True
+
+    Example::
+
+        assert is_struc(1) == False
+
+    Args:
+      o (Any): the object to test.
+
+    Returns:
+      bool: if the object appears to be a structure from the wasm library.
+    '''
     return  '.GeneratedStructureData' in str(type(o))
 
 
 def format_value(name, value):
+    '''
+    format the given value into something human readable, using the given name as a hint.
+
+    Example::
+
+        assert format_value('sections:11:payload_len', 0x23) == '0x23'
+
+    Example::
+
+        assert format_value('sections:1:payload:entries:0:param_types', [-1, -1, -1]) == '[i32, i32, i32]'
+
+    Args:
+      name (str): the structure property name.
+      value (Any): the value to format.
+
+    Returns:
+      str: a string formatted for human consumption.
+    '''
     if isinstance(value, int):
         # a heuristic to detect fields that contain a type value
         if 'type' in name or 'form' in name:
@@ -72,30 +129,84 @@ def format_value(name, value):
 
 
 def load_struc(struc, p, path):
+    '''
+    Load the given structure into the current IDA Pro at the given offset.
+
+    Example::
+
+        load_struc(sections[0].data, 0x0, 'foo-section')
+
+    Args:
+      struc (wasm.Structure): the structure to load.
+      p (int): the effective address at which to load.
+      path (str): the namespaced name of the given structure.
+
+    Returns:
+      int: the next offset following the loaded structure.
+    '''
     for field in get_fields(struc):
+        # build names like: `sections:2:payload:entries:0:module_str`
         name = path + ':' + field.name
+
+        # recurse into nested structures
         if is_struc(field.value):
             p = load_struc(field.value, p, name)
-        elif isinstance(field.value, list) and len(field.value) > 0 and is_struc(field.value[0]):
+
+        # recurse into lists of structures
+        elif isinstance(field.value, list) and \
+             len(field.value) > 0 and \
+             is_struc(field.value[0]):
+
             for i, v in enumerate(field.value):
                 p = load_struc(v, p, name + ':' + str(i))
+
+        # emit primitive types
         else:
+            # add annotations like follows:
+            #
+            #     imports:002D sections:2:payload:entries:0:module_len         <--- Add line prior to element.
+            #     imports:002D                 db 3                    ;; 0x3  <--- Render element for human consumption.
+            #     imports:002E sections:2:payload:entries:0:module_str
+            #     imports:002E                 db 0x65 ;; e            ;; env  <--- Pull out strings and lists nicely.
+            #     imports:002F                 db 0x6E ;; n
+            #     imports:0030                 db 0x76 ;; v
+
+            # add line prior to element
             idc.ExtLinA(p, 0, name)
+
+            # if primitive integer element, set it as such
             if isinstance(field.value, int):
                 MakeN(p, field.size)
+
+            # add comment containing human-readable representation
             idc.MakeComm(p, format_value(name, field.value).encode('utf-8'))
+
             p += field.size
 
     return p
 
 
 def load_section(section, p):
+    '''
+    Load the given section into the current IDA Pro at the given offset.
+
+    Example::
+
+        load_section(sections[0], 0x0)
+
+    Args:
+      struc (wasm.Structure): the structure to load.
+      p (int): the effective address at which to load.
+
+    Returns:
+      int: the next offset following the loaded structure.
+    '''
     load_struc(section.data, p, 'sections:' + str(section.data.id))
 
 
 def load_globals_section(section, p):
     '''
-    specialized handler for the globals section to mark the initializer as code.
+    Specialized handler for the GLOBALS section to mark the initializer as code.
     '''
     ppayload = p + offset_of(section.data, 'payload')
     pglobals = ppayload + offset_of(section.data.payload, 'globals')
@@ -120,7 +231,7 @@ def load_globals_section(section, p):
 
 def load_elements_section(section, p):
     '''
-    specialized handler for the elements section to mark the offset initializer as code.
+    Specialized handler for the ELEMENTS section to mark the offset initializer as code.
     '''
     ppayload = p + offset_of(section.data, 'payload')
     pentries = ppayload + offset_of(section.data.payload, 'entries')
@@ -132,7 +243,7 @@ def load_elements_section(section, p):
 
 def load_data_section(section, p):
     '''
-    specialized handler for the data section to mark the offset initializer as code.
+    specialized handler for the DATA section to mark the offset initializer as code.
     '''
     ppayload = p + offset_of(section.data, 'payload')
     pentries = ppayload + offset_of(section.data.payload, 'entries')
@@ -142,7 +253,6 @@ def load_data_section(section, p):
         pcur += size_of(body)
 
 
-
 SECTION_LOADERS = {
     wasm.wasmtypes.SEC_GLOBAL: load_globals_section,
     wasm.wasmtypes.SEC_ELEMENT: load_elements_section,
@@ -150,42 +260,31 @@ SECTION_LOADERS = {
 }
 
 
-def compute_global_addrs(sections):
-    ret = []
-    section = get_section(sections, wasm.wasmtypes.SEC_GLOBAL)
-    ppayload = p + offset_of(section.data, 'payload')
-    pglobals = ppayload + offset_of(section.data.payload, 'globals')
-    pcur = pglobals
-    for i, body in enumerate(section.data.payload.globals):
-        ret.append(pcur + offset_of(body, 'init'))
-        pcur += size_of(body)
-
-
-def compute_function_addrs(sections):
-    ret = []
-    section = get_section(sections, wasm.wasmtypes.SEC_FUNCTION)
-    ppayload = p + offset_of(section.data, 'payload')
-    pbodies = ppayload + offset_of(section.data.payload, 'bodies')
-    pcur = pbodies
-    for i, body in enumerate(section.data.payload.bodies):
-        pcode = pcur + offset_of(body, 'code')
-        ret.append({
-            'index': i,
-            'addr': pcode,
-            'body': body,
-        })
-        pcur += size_of(body)
-
-
 def load_file(f, neflags, format):
+    '''
+    load the given file into the current IDA Pro database.
+
+    Args:
+      f (file): the file-like object to load.
+      neflags (Any): unused
+      format (Any): unused
+
+    Returns:
+      int: 1 on success, 0 on failure
+    '''
+
+    # compute file size, then read the entire contents
     f.seek(0x0, os.SEEK_END)
     flen = f.tell()
     f.seek(0x0)
     buf = f.read(flen)
 
+    # mark the proc type, so IDA can invoke the correct disassembler/processor.
+    # this must match `processor.wasm_processor_t.psnames`
     idaapi.set_processor_type('wasm', idaapi.SETPROC_ALL)
 
     f.seek(0x0)
+    # load the entire file directly at address zero.
     f.file2base(0, 0, len(buf), True)
 
     p = 0
@@ -205,6 +304,7 @@ def load_file(f, neflags, format):
         else:
             stype = 'DATA'
 
+        # add IDA segment with type, name, size as appropriate
         slen = sum(section.data.get_decoder_meta()['lengths'].values())
         idaapi.add_segm(0, p, p + slen, sname, stype)
 
