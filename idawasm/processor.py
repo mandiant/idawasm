@@ -505,6 +505,14 @@ class wasm_processor_t(idaapi.processor_t):
         logger.info('parsing functions')
         self.functions = self._parse_functions()
 
+        # map from function offset to function object
+        self.function_offsets = {f['offset']: f for f in self.functions.values() if 'offset' in f}
+
+        # map from (function start, function end) to function object
+        self.function_ranges = {
+            (f['offset'], f['offset'] + f['size']): f for f in self.functions.values() if 'offset' in f
+        }
+
         for function in self.functions.values():
             if 'offset' in function:
                 # TODO: overrides the name set by the wasm loader.
@@ -519,14 +527,6 @@ class wasm_processor_t(idaapi.processor_t):
                 idc.add_entry(function['index'], function['offset'], function['name'].encode('utf-8'), True)
 
             # TODO: idc.add_entry for the start routine. need an example of this.
-
-        # map from function offset to function object
-        self.function_offsets = {f['offset']: f for f in self.functions.values() if 'offset' in f}
-
-        # map from (function start, function end) to function object
-        self.function_ranges = {
-            (f['offset'], f['offset'] + f['size']): f for f in self.functions.values() if 'offset' in f
-        }
 
         logger.info('parsing globals')
         self.globals = self._parse_globals()
