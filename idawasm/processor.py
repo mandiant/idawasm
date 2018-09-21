@@ -1109,18 +1109,25 @@ class wasm_processor_t(idaapi.processor_t):
         # for wasm, "registers" are local variables.
         self.reg_names = []
 
+        # we'd want to scan the module and pick the max number of parameters,
+        # however, the data isn't available yet,
+        # so we pick a scary large number.
+        #
         # note: IDA reg_t size is 16-bits
-        # TODO: scan functions and pick max local size.
-        MAX_LOCALS = 0x100
+        MAX_LOCALS = 0x1000
         for i in range(MAX_LOCALS):
             self.reg_names.append("$local%d" % (i))
-        # TODO: scan functions and pick max param size.
-        MAX_PARAMS = 0x100
+
+        # we'd want to scan the module and pick the max number of parameters,
+        # however, the data isn't available yet,
+        # so we pick a scary large number.
+        MAX_PARAMS = 0x1000
         for i in range(MAX_PARAMS):
             self.reg_names.append("$param%d" % (i))
 
         # these are fake, "virtual" registers.
         # req'd for IDA, apparently.
+        # (not actually used in wasm)
         self.reg_names.append("SP")
         self.reg_names.append("CS")
         self.reg_names.append("DS")
@@ -1132,13 +1139,16 @@ class wasm_processor_t(idaapi.processor_t):
 
         # Segment register information (use virtual CS and DS registers if your
         # processor doesn't have segment registers):
+        # (not actually used in wasm)
         self.reg_first_sreg = self.ireg_CS
         self.reg_last_sreg  = self.ireg_DS
 
         # number of CS register
+        # (not actually used in wasm)
         self.reg_code_sreg = self.ireg_CS
 
         # number of DS register
+        # (not actually used in wasm)
         self.reg_data_sreg = self.ireg_DS
 
     def __init__(self):
