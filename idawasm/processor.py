@@ -1241,8 +1241,6 @@ class wasm_processor_t(idaapi.processor_t):
         self.deferred_noflows = {}
 
 
-
-
 def PROCESSOR_ENTRY():
     logging.basicConfig(level=logging.DEBUG)
     return wasm_processor_t()
