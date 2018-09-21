@@ -1,46 +1,11 @@
 # TODO:
-#  x parse items up front
-#    x all sections
-#    x blocks and branch targets
-#  x use $paramN for params, based on function prototype
-#  x mark branch code xrefs during emu
-#  x add names for globals
+#  - add call xrefs
 #  - mark data xref to memory load/store
 #  - mark data xref to global load/store
-#  x create functions
-#  x enable global var renaming
-#  x show function prototype and local var layout at function start
-#    x leading parenthesis
-#    x fn name
-#    x arguments and types
-#    x local vars and types
-#  - render trailing parenthesis
+#  - merge orphan end block
 #  - compute stack deltas
-#  x add entry point for exports
-#  - add entry point for start function
-#  - parse data section, and map at the appropriate offsets. use data segment???
-#  x label block start/end with names
-#  - merge orphan end block with prior branch insns
+#  - add entry point for start function (need to see an example)
 
-'''
-
-# WebAssembly processor module design
-
-## types
-
-wasm supports memory, discrete global variables, parameters, local variables, and a stack.
-there are no registers.
-how do we map these into IDA concepts that we can rename and reason about?
-
-parameters and local variables - map to "registers".
-you can rename registers with function scope, see: https://www.hex-rays.com/products/ida/support/idadoc/1346.shtml
-
-stack: since operands can only affect elements at the top (no arbitrary indexing), we'll simply track the sp for fun.
-
-memory: use offsets into memory section.
-
-global variables: use offsets into globals section.
-'''
 # stdlib
 import sys
 import struct
@@ -493,8 +458,7 @@ class wasm_processor_t(idaapi.processor_t):
                                               function['name'],
                                               signature)
         else:
-            name = '$func%d' % (function['index'])
-            return self._render_type(function['type'], name=name)
+            return self._render_type(function['type'], name=function['name'])
 
     @ida_entry
     def notify_newfile(self, filename):
