@@ -318,6 +318,21 @@ class wasm_processor_t(idaapi.processor_t):
 
         return branch_targets
 
+    def _parse_types(self):
+        '''
+        parse the type entries.
+
+        Returns:
+          List[Dict[str, Any]]: list if type descriptors, each which hash:
+            - form
+            - param_count
+            - param_types
+            - return_count
+            - return_type
+        '''
+        type_section = self._get_section(wasm.wasmtypes.SEC_TYPE)
+        return struc_to_dict(type_section.data.payload.entries)
+
     def _parse_globals(self):
         '''
         parse the global entries.
@@ -507,6 +522,9 @@ class wasm_processor_t(idaapi.processor_t):
 
         self.buf = b''.join(buf)
         self.sections = list(wasm.decode.decode_module(self.buf))
+
+        logger.info('parsing types')
+        self.types = self._parse_types()
 
         logger.info('parsing functions')
         self.functions = self._parse_functions()
@@ -741,9 +759,19 @@ class wasm_processor_t(idaapi.processor_t):
                 return True
 
             elif wtype == WASM_TYPE_INDEX:
-                ctx.out_keyword('type:')
-                width = self.dt_to_width(op.dtype)
-                ctx.out_value(op, idaapi.OOFW_IMM | width)
+                # resolve the type index into a type,
+                # then human-render it.
+                #
+                # eg.
+                #
+                #     code:0B7F  call_indirect  (func (param $param0 i32) (param $param1 i32) (result i32)), 0
+                #                  ^
+                #                 this thing
+                type_index = op.value
+                type = self.types[type_index]
+                signature = self._render_type(type)
+
+                ctx.out_keyword(signature)
                 return True
 
             elif wtype == WASM_ALIGN:
@@ -1134,6 +1162,8 @@ class wasm_processor_t(idaapi.processor_t):
         self.globals = {}
         # map from va to map from relative depth to va
         self.branch_targets = {}
+        # list of type descriptors
+        self.types = []
 
 
 def PROCESSOR_ENTRY():

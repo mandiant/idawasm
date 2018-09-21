@@ -44,6 +44,18 @@ def get_fields(struc):
 
 
 def struc_to_dict(struc):
-    return {
-        f.name: f.value for f in get_fields(struc)
-    }
+    if isinstance(struc, str):
+        return struc
+    elif isinstance(struc, int):
+        return struc
+    elif isinstance(struc, dict):
+        return {k: struc_to_dict(v) for k, v in struc.items()}
+    elif isinstance(struc, list):
+        return [struc_to_dict(f) for f in struc]
+    # ew
+    elif '.GeneratedStructureData' in str(type(struc)):
+        return {f.name: struc_to_dict(f.value) for f in get_fields(struc)}
+    elif isinstance(struc, memoryview):
+        return struc.tobytes().decode('utf-8')
+    else:
+        raise ValueError('unexpected type: ' + str(type(struc)))
