@@ -1,7 +1,6 @@
 # TODO:
 #  - name locations
 #  - mark data xref to memory load/store
-#  - mark data xref to global load/store
 #  - compute stack deltas
 #  - add entry point for start function (need to see an example)
 
@@ -715,6 +714,24 @@ class wasm_processor_t(idaapi.processor_t):
 
         # note: `next` may be None if invalid.
         next = idautils.DecodeInstruction(insn.ea + insn.size)
+
+
+        # add drefs to globals
+        for i in range(3):
+            op = insn[i]
+            if not (op.type == idaapi.o_imm and op.specval == WASM_GLOBAL):
+                continue
+
+            global_va = self.globals[op.value]['offset']
+            print('global dref: %x %x', insn.ea, global_va)
+            if insn.itype == self.itype_SET_GLOBAL:
+                idc.add_dref(insn.ea, global_va, idc.dr_W)
+            elif insn.itype == self.itype_GET_GLOBAL:
+                idc.add_dref(insn.ea, global_va, idc.dr_R)
+            else:
+                raise RuntimeError('unexpected instruction referencing global: ' + str(insn))
+
+        # TODO: add drefs to memory, but need example of this first.
 
         # handle cases like:
         #
