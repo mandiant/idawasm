@@ -15,19 +15,25 @@ Features:
 
 There are two steps to install this loader and processor:
 
- 1) install the python module:
-
+1. install the python module:
+  
+```
     python.exe setup.py install
-       
- 2) install the IDA plugins
-  a) manually copy the loader:
+```
 
+2. install the IDA plugins
+  
+  2a. manually copy the loader:
+    
+```
     mv loaders\wasm_loader.py %IDADIR%\loaders\wasm.py
+```
 
-  b) manually copy the processor:
-
+  2b. manually copy the processor:
+    
+```
     mv procs\wasm_processor.py %IDADIR%\procs\wasm.py
-
+```
 
 Whenever you update this project, you'll need to update the python module, but shouldn't have to touch the loader and processor files.
 
