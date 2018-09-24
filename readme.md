@@ -10,12 +10,21 @@ Features:
   - globals, function parameters, local variables, etc. can be renamed
   - auto-comment hint suport
   
+  
+#### recognizes WebAssembly modules
 
 ![load-wasm](img/load-wasm.png)
 
+
+#### reconstructions control flow
+
 ![graph-mode](img/graph-mode.png)
 
+#### parses and renders types
+
 ![render-prototype](img/render-prototype.png)
+
+#### extracts code and data cross references
 
 ![drefs](img/drefs.png)
 
@@ -30,13 +39,13 @@ There are three steps to install this loader and processor:
     python.exe setup.py install
 ```
 
-2. manually install the IDA WebAssembly file loader:
+2. manually install the WebAssembly file loader:
     
 ```
     mv loaders\wasm_loader.py %IDADIR%\loaders\wasm.py
 ```
 
-3. manually install the IDA WebAssembly processor:
+3. manually install the WebAssembly processor:
     
 ```
     mv procs\wasm_processor.py %IDADIR%\procs\wasm.py
