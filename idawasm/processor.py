@@ -1,20 +1,17 @@
 # TODO:
 #  - name locations
 #  - mark data xref to memory load/store
+#  - mark xref to imports
 #  - compute stack deltas
 #  - add entry point for start function (need to see an example)
 
 # stdlib
-import sys
-import struct
 import logging
 import functools
 
 # from pip
 import wasm
-import wasm.decode
 import wasm.wasmtypes
-import hexdump
 
 # from IDA
 import idc
@@ -23,7 +20,6 @@ import idautils
 
 # from this project
 import idawasm.const
-from idawasm.common import *
 
 
 logger = logging.getLogger(__name__)
@@ -57,7 +53,9 @@ def no_exceptions(f):
     def wrapper(*args, **kwargs):
         try:
             return f(*args, **kwargs)
-        except:
+        # we explicitly want to catch all exceptions here,
+        # because IDA cannot handle them.
+        except:  # NOQA: E722 do not use bare 'except'
             logger.error('exception in %s', f.__name__, exc_info=True)
             return 0
     return wrapper
@@ -79,8 +77,8 @@ class wasm_processor_t(idaapi.processor_t):
     segreg_size = 0
     tbyte_size = 0
     assembler = {
-        'flag' : idaapi.ASH_HEXF3 | idaapi.AS_UNEQU | idaapi.AS_COLON | idaapi.ASB_BINF4 | idaapi.AS_N2CHR,
-        'uflag' : 0,
+        'flag': idaapi.ASH_HEXF3 | idaapi.AS_UNEQU | idaapi.AS_COLON | idaapi.ASB_BINF4 | idaapi.AS_N2CHR,
+        'uflag': 0,
         'name': "WebAssembly assembler",
         'origin': "org",
         'end': "end",
@@ -122,11 +120,12 @@ class wasm_processor_t(idaapi.processor_t):
         '''
         returns OOFW_xxx flag given a dt_xxx
         '''
-        if    dt == idaapi.dt_byte:  return idaapi.OOFW_8
-        elif  dt == idaapi.dt_word:  return idaapi.OOFW_16
-        elif  dt == idaapi.dt_dword: return idaapi.OOFW_32
-        elif  dt == idaapi.dt_qword: return idaapi.OOFW_64
-        else: raise ValueError('unexpected dt: ' + str(dt))
+        return {
+            idaapi.dt_byte:  idaapi.OOFW_8,
+            idaapi.dt_word:  idaapi.OOFW_16,
+            idaapi.dt_dword: idaapi.OOFW_32,
+            idaapi.dt_qword: idaapi.OOFW_64,
+        }[dt]
 
     def _get_section(self, section_id):
         '''
@@ -168,11 +167,11 @@ class wasm_processor_t(idaapi.processor_t):
         p = 0
         for i, section in enumerate(self.sections):
             if i == 0:
-                p += size_of(section.data)
+                p += idawasm.common.size_of(section.data)
                 continue
 
             if section.data.id != section_id:
-                p += size_of(section.data)
+                p += idawasm.common.size_of(section.data)
                 continue
 
             return p
@@ -272,12 +271,12 @@ class wasm_processor_t(idaapi.processor_t):
         code_section = self._get_section(wasm.wasmtypes.SEC_CODE)
         pcode_section = self._get_section_offset(wasm.wasmtypes.SEC_CODE)
 
-        ppayload = pcode_section + offset_of(code_section.data, 'payload')
-        pbody = ppayload + offset_of(code_section.data.payload, 'bodies')
+        ppayload = pcode_section + idawasm.common.offset_of(code_section.data, 'payload')
+        pbody = ppayload + idawasm.common.offset_of(code_section.data.payload, 'bodies')
         for body in code_section.data.payload.bodies:
-            pcode = pbody + offset_of(body, 'code')
+            pcode = pbody + idawasm.common.offset_of(body, 'code')
             branch_targets.update(self._compute_function_branch_targets(pcode, body.code))
-            pbody += size_of(body)
+            pbody += idawasm.common.size_of(body)
 
         return branch_targets
 
@@ -294,7 +293,7 @@ class wasm_processor_t(idaapi.processor_t):
             - return_type
         '''
         type_section = self._get_section(wasm.wasmtypes.SEC_TYPE)
-        return struc_to_dict(type_section.data.payload.entries)
+        return idawasm.common.struc_to_dict(type_section.data.payload.entries)
 
     def _parse_globals(self):
         '''
@@ -307,18 +306,18 @@ class wasm_processor_t(idaapi.processor_t):
         global_section = self._get_section(wasm.wasmtypes.SEC_GLOBAL)
         pglobal_section = self._get_section_offset(wasm.wasmtypes.SEC_GLOBAL)
 
-        ppayload = pglobal_section + offset_of(global_section.data, 'payload')
-        pglobals = ppayload + offset_of(global_section.data.payload, 'globals')
+        ppayload = pglobal_section + idawasm.common.offset_of(global_section.data, 'payload')
+        pglobals = ppayload + idawasm.common.offset_of(global_section.data.payload, 'globals')
         pcur = pglobals
         for i, body in enumerate(global_section.data.payload.globals):
-            pinit = pcur + offset_of(body, 'init')
+            pinit = pcur + idawasm.common.offset_of(body, 'init')
             ctype = idawasm.const.WASM_TYPE_NAMES[body.type.content_type]
             globals_[i] = {
                 'index': i,
                 'offset': pinit,
                 'type': ctype,
             }
-            pcur += size_of(body)
+            pcur += idawasm.common.size_of(body)
         return globals_
 
     def _parse_imported_functions(self):
@@ -345,7 +344,7 @@ class wasm_processor_t(idaapi.processor_t):
                 'index': function_index,
                 'module': entry.module_str.tobytes().decode('utf-8'),
                 'name': entry.field_str.tobytes().decode('utf-8'),
-                'type': struc_to_dict(ftype),
+                'type': idawasm.common.struc_to_dict(ftype),
                 'imported': True,
                 # TODO: not sure if an import can be exported.
                 'exported': False,
@@ -391,8 +390,8 @@ class wasm_processor_t(idaapi.processor_t):
         type_section = self._get_section(wasm.wasmtypes.SEC_TYPE)
 
         payload = code_section.data.payload
-        ppayload = pcode_section + offset_of(code_section.data, 'payload')
-        pbody = ppayload + offset_of(payload, 'bodies')
+        ppayload = pcode_section + idawasm.common.offset_of(code_section.data, 'payload')
+        pbody = ppayload + idawasm.common.offset_of(payload, 'bodies')
         for i in range(code_section.data.payload.count):
             function_index = len(imported_functions) + i
             body = code_section.data.payload.bodies[i]
@@ -415,15 +414,15 @@ class wasm_processor_t(idaapi.processor_t):
             functions[function_index] = {
                 'index': function_index,
                 'name': name,
-                'offset': pbody + offset_of(body, 'code'),
-                'type': struc_to_dict(ftype),
+                'offset': pbody + idawasm.common.offset_of(body, 'code'),
+                'type': idawasm.common.struc_to_dict(ftype),
                 'exported': is_exported,
                 'imported': False,
                 'local_types': local_types,
-                'size': size_of(body, 'code'),
+                'size': idawasm.common.size_of(body, 'code'),
             }
 
-            pbody += size_of(body)
+            pbody += idawasm.common.size_of(body)
 
         return functions
 
@@ -436,7 +435,7 @@ class wasm_processor_t(idaapi.processor_t):
         params = []
         if type_['param_count'] > 0:
             for i, param in enumerate(type_['param_types']):
-                params.append(' (param $param%d %s)'  % (i, idawasm.const.WASM_TYPE_NAMES[param]))
+                params.append(' (param $param%d %s)' % (i, idawasm.const.WASM_TYPE_NAMES[param]))
         sparam = ''.join(params)
 
         if type_['return_count'] == 0:
@@ -715,7 +714,6 @@ class wasm_processor_t(idaapi.processor_t):
         # note: `next` may be None if invalid.
         next = idautils.DecodeInstruction(insn.ea + insn.size)
 
-
         # add drefs to globals
         for i in range(3):
             op = insn[i]
@@ -723,7 +721,6 @@ class wasm_processor_t(idaapi.processor_t):
                 continue
 
             global_va = self.globals[op.value]['offset']
-            print('global dref: %x %x', insn.ea, global_va)
             if insn.itype == self.itype_SET_GLOBAL:
                 idc.add_dref(insn.ea, global_va, idc.dr_W)
             elif insn.itype == self.itype_GET_GLOBAL:
@@ -741,11 +738,11 @@ class wasm_processor_t(idaapi.processor_t):
         #     end
         #
         # we want the cref to flow from the instruction `end`, not `br $foo`.
-        if insn.itype in {self.itype_BR,
-                          self.itype_BR_IF,
-                          self.itype_BR_TABLE,} and \
-            next is not None and \
-            next.itype == self.itype_END:
+        if (insn.itype in {self.itype_BR,
+                           self.itype_BR_IF,
+                           self.itype_BR_TABLE}
+              and next is not None                # NOQA: E127 continuation line over-indented for visual indent
+              and next.itype == self.itype_END):  # NOQA: E127
 
             if insn.itype == self.itype_BR:
                 return self.notify_emu_BR_END(insn, next)
@@ -763,9 +760,9 @@ class wasm_processor_t(idaapi.processor_t):
         #     end
         #
         # we want return to flow into the return, which should then not flow.
-        elif insn.itype == self.itype_RETURN and \
-             next is not None and \
-             next.itype == self.itype_END:
+        elif (insn.itype == self.itype_RETURN
+              and next is not None
+              and next.itype == self.itype_END):
             return self.notify_emu_RETURN_END(insn, next)
 
         # handle other RETURN and UNREACHABLE instructions.
@@ -975,7 +972,7 @@ class wasm_processor_t(idaapi.processor_t):
         ctx.out_mnemonic()
         ctx.out_one_operand(0)
 
-        for i in xrange(1, 3):
+        for i in range(1, 3):
             op = insn[i]
 
             if op.type == idaapi.o_void:
@@ -1070,8 +1067,8 @@ class wasm_processor_t(idaapi.processor_t):
             # this is how IDA knows the size of the insn.
             insn.get_next_byte()
 
-        insn.Op1.type  = idaapi.o_void
-        insn.Op2.type  = idaapi.o_void
+        insn.Op1.type = idaapi.o_void
+        insn.Op2.type = idaapi.o_void
 
         # decode instruction operand.
         # as of today (V1), there's at most a single operand.
@@ -1090,7 +1087,6 @@ class wasm_processor_t(idaapi.processor_t):
             immtype = bc.imm.get_meta().structure
 
             SHOW_FLAGS = idaapi.OF_NO_BASE_DISP | idaapi.OF_NUMBER | idaapi.OF_SHOW
-            NOSHOW_FLAGS = 0
 
             # wasm is currently single-byte opcode only
             # therefore the first operand must be found at offset 0x1.
@@ -1160,7 +1156,7 @@ class wasm_processor_t(idaapi.processor_t):
             elif immtype == wasm.immtypes.LocalVarXsImm:
                 # local_index = VarUInt32Field()
                 insn.Op1.type = idaapi.o_reg
-                insn.Op1.reg  = bc.imm.local_index
+                insn.Op1.reg = bc.imm.local_index
                 insn.Op1.specval = WASM_LOCAL
 
             elif immtype == wasm.immtypes.GlobalVarXsImm:
@@ -1275,14 +1271,14 @@ class wasm_processor_t(idaapi.processor_t):
 
         # Create the ireg_XXXX constants.
         # for wasm, will look like: ireg_LOCAL0, ireg_PARAM0
-        for i in xrange(len(self.reg_names)):
+        for i in range(len(self.reg_names)):
             setattr(self, 'ireg_' + self.reg_names[i].replace('$', ''), i)
 
         # Segment register information (use virtual CS and DS registers if your
         # processor doesn't have segment registers):
         # (not actually used in wasm)
         self.reg_first_sreg = self.ireg_CS
-        self.reg_last_sreg  = self.ireg_DS
+        self.reg_last_sreg = self.ireg_DS
 
         # number of CS register
         # (not actually used in wasm)
@@ -1295,7 +1291,7 @@ class wasm_processor_t(idaapi.processor_t):
     def __init__(self):
         # this is called prior to loading a binary, so don't read from the database here.
         idaapi.processor_t.__init__(self)
-        self.PTRSZ = 4 # Assume PTRSZ = 4 by default
+        self.PTRSZ = 4  # Assume PTRSZ = 4 by default
         self.init_instructions()
         self.init_registers()
 

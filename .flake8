@@ -1,0 +1,13 @@
+[flake8]
+# E241: multiple spaces after :
+# eg.
+#     foo = {'bar':  1,
+#            'whoo': 2}
+# W503: line break before binary operator
+# eg.
+#     if (one
+#         and two):
+ignore = E241, W503
+max-line-length = 120
+exclude = tests/*
+max-complexity = 10

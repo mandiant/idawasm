@@ -43,6 +43,29 @@ def get_fields(struc):
         p += flen
 
 
+def is_struc(o):
+    '''
+    does the given object look like a structure from the wasm library.
+
+    this is super ugly, but since the wasm library creates types on demand, i'm not sure how else to test for them.
+
+    Example::
+
+        assert is_struc(section.data) == True
+
+    Example::
+
+        assert is_struc(1) == False
+
+    Args:
+      o (Any): the object to test.
+
+    Returns:
+      bool: if the object appears to be a structure from the wasm library.
+    '''
+    return '.GeneratedStructureData' in str(type(o))
+
+
 def struc_to_dict(struc):
     if isinstance(struc, str):
         return struc
@@ -52,8 +75,7 @@ def struc_to_dict(struc):
         return {k: struc_to_dict(v) for k, v in struc.items()}
     elif isinstance(struc, list):
         return [struc_to_dict(f) for f in struc]
-    # ew
-    elif '.GeneratedStructureData' in str(type(struc)):
+    elif is_struc(struc):
         return {f.name: struc_to_dict(f.value) for f in get_fields(struc)}
     elif isinstance(struc, memoryview):
         return struc.tobytes().decode('utf-8')

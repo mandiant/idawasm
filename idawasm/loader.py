@@ -9,7 +9,7 @@ import idc
 import idaapi
 
 import idawasm.const
-from idawasm.common import *
+import idawasm.common
 
 
 def accept_file(f, n):
@@ -64,29 +64,6 @@ def get_section(sections, section_id):
             continue
 
         return section
-
-
-def is_struc(o):
-    '''
-    does the given object look like a structure from the wasm library.
-
-    this is super ugly, but since the wasm library creates types on demand, i'm not sure how else to test for them.
-
-    Example::
-
-        assert is_struc(section.data) == True
-
-    Example::
-
-        assert is_struc(1) == False
-
-    Args:
-      o (Any): the object to test.
-
-    Returns:
-      bool: if the object appears to be a structure from the wasm library.
-    '''
-    return  '.GeneratedStructureData' in str(type(o))
 
 
 def format_value(name, value):
@@ -144,18 +121,18 @@ def load_struc(struc, p, path):
     Returns:
       int: the next offset following the loaded structure.
     '''
-    for field in get_fields(struc):
+    for field in idawasm.common.get_fields(struc):
         # build names like: `sections:2:payload:entries:0:module_str`
         name = path + ':' + field.name
 
         # recurse into nested structures
-        if is_struc(field.value):
+        if idawasm.common.is_struc(field.value):
             p = load_struc(field.value, p, name)
 
         # recurse into lists of structures
-        elif isinstance(field.value, list) and \
-             len(field.value) > 0 and \
-             is_struc(field.value[0]):
+        elif (isinstance(field.value, list)
+              and len(field.value) > 0
+              and idawasm.common.is_struc(field.value[0])):
 
             for i, v in enumerate(field.value):
                 p = load_struc(v, p, name + ':' + str(i))
@@ -165,7 +142,7 @@ def load_struc(struc, p, path):
             # add annotations like follows:
             #
             #     imports:002D sections:2:payload:entries:0:module_len         <--- Add line prior to element.
-            #     imports:002D                 db 3                    ;; 0x3  <--- Render element for human consumption.
+            #     imports:002D                 db 3                    ;; 0x3  <--- Render element for human.
             #     imports:002E sections:2:payload:entries:0:module_str
             #     imports:002E                 db 0x65 ;; e            ;; env  <--- Pull out strings and lists nicely.
             #     imports:002F                 db 0x6E ;; n
@@ -208,8 +185,8 @@ def load_globals_section(section, p):
     '''
     Specialized handler for the GLOBALS section to mark the initializer as code.
     '''
-    ppayload = p + offset_of(section.data, 'payload')
-    pglobals = ppayload + offset_of(section.data.payload, 'globals')
+    ppayload = p + idawasm.common.offset_of(section.data, 'payload')
+    pglobals = ppayload + idawasm.common.offset_of(section.data.payload, 'globals')
     pcur = pglobals
     for i, body in enumerate(section.data.payload.globals):
         gname = 'global_%X' % (i)
@@ -221,36 +198,36 @@ def load_globals_section(section, p):
         #     global_0_init:  <---- fake label line
         #        i32.const    <---- init expression insns
         #        ret
-        pinit = pcur + offset_of(body, 'init')
+        pinit = pcur + idawasm.common.offset_of(body, 'init')
         idc.MakeName(pinit, gname)
         idc.ExtLinA(pinit, 0, gname + '_init:')
         idc.MakeCode(pinit)
 
-        pcur += size_of(body)
+        pcur += idawasm.common.size_of(body)
 
 
 def load_elements_section(section, p):
     '''
     Specialized handler for the ELEMENTS section to mark the offset initializer as code.
     '''
-    ppayload = p + offset_of(section.data, 'payload')
-    pentries = ppayload + offset_of(section.data.payload, 'entries')
+    ppayload = p + idawasm.common.offset_of(section.data, 'payload')
+    pentries = ppayload + idawasm.common.offset_of(section.data.payload, 'entries')
     pcur = pentries
     for i, body in enumerate(section.data.payload.entries):
-        idc.MakeCode(pcur + offset_of(body, 'offset'))
-        pcur += size_of(body)
+        idc.MakeCode(pcur + idawasm.common.offset_of(body, 'offset'))
+        pcur += idawasm.common.size_of(body)
 
 
 def load_data_section(section, p):
     '''
     specialized handler for the DATA section to mark the offset initializer as code.
     '''
-    ppayload = p + offset_of(section.data, 'payload')
-    pentries = ppayload + offset_of(section.data.payload, 'entries')
+    ppayload = p + idawasm.common.offset_of(section.data, 'payload')
+    pentries = ppayload + idawasm.common.offset_of(section.data.payload, 'entries')
     pcur = pentries
     for i, body in enumerate(section.data.payload.entries):
-        idc.MakeCode(pcur + offset_of(body, 'offset'))
-        pcur += size_of(body)
+        idc.MakeCode(pcur + idawasm.common.offset_of(body, 'offset'))
+        pcur += idawasm.common.size_of(body)
 
 
 SECTION_LOADERS = {

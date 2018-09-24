@@ -1,5 +1,2 @@
-import wasm
-import wasm.decode
-
-import idawasm.processor
-from idawasm.processor import *
+import idawasm.processor  # NOQA: F401 imported but unused
+from idawasm.processor import *  # NOQA: F401, F403 unable to detect undefined names
