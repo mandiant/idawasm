@@ -3,7 +3,7 @@
 import setuptools
 
 setuptools.setup(
-        name="ida-wasm",
+        name="idawasm",
         version="0.1",
         description="IDA loader and processor for WebAssembly.",
         author="Willi Ballenthin",
