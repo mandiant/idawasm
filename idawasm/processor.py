@@ -1,5 +1,4 @@
 # TODO:
-#  - add call xrefs
 #  - mark data xref to memory load/store
 #  - mark data xref to global load/store
 #  - compute stack deltas
@@ -522,6 +521,9 @@ class wasm_processor_t(idaapi.processor_t):
         logger.info('computing branch targets')
         self.branch_targets = self._compute_branch_targets()
 
+        self.deferred_noflows = {}
+        self.deferred_flows = {}
+
     @ida_entry
     def notify_get_autocmt(self, insn):
         '''
@@ -553,7 +555,50 @@ class wasm_processor_t(idaapi.processor_t):
         subsequent instructions, modify flags etc. Upon entrance to this function
         all information about the instruction is in 'insn' structure.
         If zero is returned, the kernel will delete the instruction.
+
+        adding xrefs is fairly straightforward, except for one hiccup:
+        we'd like xrefs to flow from trailing END instructions,
+         rather than getting orphaned in their own basic block.
+
+        for example, consider the following:
+
+            br $block0
+            end
+
+        if we place the code flow xref on the BR,
+         then there is no flow to the END instruction,
+         and the graph will look like:
+
+            +------------+     +-----+
+            |     ...    |     | end |
+            | br $block0 |     +-----+
+            +------------+
+                   |
+                  ...
+
+        instead, we want the code flow xref to flow from the END,
+         deferred from the BR, so the graph looks like this:
+
+            +------------+
+            |     ...    |
+            | br $block0 |
+            | end        |
+            +------------+
+                   |
+                  ...
+
+        to do this, at branching instruction,
+         we detect if the following instruction is an END.
+        if so, we flow through to the END,
+         and queue the xrefs to be added when the END is processed.
+
+        this assumes that the branching instructions are always analyzed before the END instructions.
+
+        unfortunately, adding xrefs on subsequent instructions doesn't work (the node doesn't exist, or something).
+        so, we have to used this "deferred" approach.
         '''
+
+        # note: `next` may be None if invalid.
         next = idautils.DecodeInstruction(insn.ea + insn.size)
 
         # handle cases like:
@@ -572,9 +617,11 @@ class wasm_processor_t(idaapi.processor_t):
 
             # unconditional branch.
             if insn.itype == self.itype_BR:
-                # TODO: is it a valid assumption that the branch target exists?
 
-                # unconditional branch, so no flow to following instruction
+                # BR flows to the END
+                idaapi.add_cref(insn.ea, insn.ea + insn.size, idaapi.fl_F)
+
+                # unconditional branch, so END does not flow to following instruction
                 self.deferred_noflows[next.ea] = True
 
                 # branch target
@@ -584,11 +631,12 @@ class wasm_processor_t(idaapi.processor_t):
                     target_va = target_block['end_offset']
                     self.deferred_flows[next.ea] = [(next.ea, target_va, idaapi.fl_JF)]
 
-                # but the BR does flow to the END
-                idaapi.add_cref(insn.ea, insn.ea + insn.size, idaapi.fl_F)
-
             # conditional branch
             elif insn.itype == self.itype_BR_IF:
+
+                # BR_IF flows to the END
+                idaapi.add_cref(insn.ea, insn.ea + insn.size, idaapi.fl_F)
+
                 # conditional branch, so there will be a fallthrough flow.
                 # the default behavior of `end` is to fallthrough, so don't change that.
                 pass
@@ -599,9 +647,6 @@ class wasm_processor_t(idaapi.processor_t):
                     target_block = targets[insn.Op1.value]
                     target_va = target_block['end_offset']
                     self.deferred_flows[next.ea] = [(next.ea, target_va, idaapi.fl_JF)]
-
-                # but the BR_IF does flow to the END
-                idaapi.add_cref(insn.ea, insn.ea + insn.size, idaapi.fl_F)
 
             # branch table, which i haven't seen before
             elif insn.itype in (self.itype_BR_TABLE, ):
