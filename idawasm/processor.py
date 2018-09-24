@@ -1,4 +1,5 @@
 # TODO:
+#  - name locations
 #  - mark data xref to memory load/store
 #  - mark data xref to global load/store
 #  - compute stack deltas
@@ -548,6 +549,120 @@ class wasm_processor_t(idaapi.processor_t):
         else:
             return 0
 
+    def notify_emu_BR_END(self, insn, next):
+        # unconditional branch followed by END.
+
+        # BR flows to the END
+        idaapi.add_cref(insn.ea, insn.ea + insn.size, idaapi.fl_F)
+
+        # unconditional branch, so END does not flow to following instruction
+        self.deferred_noflows[next.ea] = True
+
+        # branch target
+        if insn.ea in self.branch_targets:
+            targets = self.branch_targets[insn.ea]
+            target_block = targets[insn.Op1.value]
+            target_va = target_block['end_offset']
+            self.deferred_flows[next.ea] = [(next.ea, target_va, idaapi.fl_JF)]
+
+        return 1
+
+    def notify_emu_BR_IF_END(self, insn, next):
+        # BR_IF flows to the END
+        idaapi.add_cref(insn.ea, insn.ea + insn.size, idaapi.fl_F)
+
+        # conditional branch, so there will be a fallthrough flow.
+        # the default behavior of `end` is to fallthrough, so don't change that.
+        pass
+
+        # branch target
+        if insn.ea in self.branch_targets:
+            targets = self.branch_targets[insn.ea]
+            target_block = targets[insn.Op1.value]
+            target_va = target_block['end_offset']
+            self.deferred_flows[next.ea] = [(next.ea, target_va, idaapi.fl_JF)]
+
+        return 1
+
+    def notify_emu_RETURN_END(self, insn, next):
+        # the RETURN will fallthrough to END,
+        idaapi.add_cref(insn.ea, insn.ea + insn.size, idaapi.fl_F)
+
+        # but the END will not fallthrough.
+        self.deferred_noflows[next.ea] = True
+
+        return 1
+
+    def notify_emu_BR(self, insn):
+        # handle an unconditional branch not at the end of a black.
+
+        # unconditional branch does not fallthrough flow.
+        pass
+
+        # branch target
+        if insn.ea in self.branch_targets:
+            targets = self.branch_targets[insn.ea]
+            target_block = targets[insn.Op1.value]
+            target_va = target_block['end_offset']
+            idaapi.add_cref(insn.ea, target_va, idaapi.fl_JF)
+
+        return 1
+
+    def notify_emu_BR_IF(self, insn):
+        # handle a conditional branch not at the end of a block.
+        # fallthrough flow
+        idaapi.add_cref(insn.ea, insn.ea + insn.size, idaapi.fl_F)
+
+        # branch target
+        if insn.ea in self.branch_targets:
+            targets = self.branch_targets[insn.ea]
+            target_block = targets[insn.Op1.value]
+            target_va = target_block['end_offset']
+            idaapi.add_cref(insn.ea, target_va, idaapi.fl_JF)
+
+        return 1
+
+    def notify_emu_END(self, insn):
+        for flow in self.deferred_flows.get(insn.ea, []):
+            idaapi.add_cref(*flow)
+
+        if insn.ea in self.branch_targets:
+            targets = self.branch_targets[insn.ea]
+            block = targets['block']
+            if block['type'] == 'loop':
+                # end of loop
+
+                # noflow
+
+                # branch back to top of loop
+                target_va = block['offset']
+                idaapi.add_cref(insn.ea, target_va, idaapi.fl_JF)
+
+            elif block['type'] == 'if':
+                # end of if
+                raise NotImplementedError('if')
+
+            elif block['type'] == 'block':
+                # end of block
+                # fallthrough flow, unless a deferred noflow from earlier, such as the case:
+                #
+                #     return
+                #     end
+                #
+                # the RETURN is the end of the function, so no flow after the END.
+                if insn.ea not in self.deferred_noflows:
+                    idaapi.add_cref(insn.ea, insn.ea + insn.size, idaapi.fl_F)
+
+            elif block['type'] == 'function':
+                # end of function
+                # noflow
+                pass
+
+            else:
+                raise RuntimeError('unexpected block type: ' + block['type'])
+
+        return 1
+
     @ida_entry
     def notify_emu(self, insn):
         '''
@@ -615,42 +730,13 @@ class wasm_processor_t(idaapi.processor_t):
             next is not None and \
             next.itype == self.itype_END:
 
-            # unconditional branch.
             if insn.itype == self.itype_BR:
+                return self.notify_emu_BR_END(insn, next)
 
-                # BR flows to the END
-                idaapi.add_cref(insn.ea, insn.ea + insn.size, idaapi.fl_F)
-
-                # unconditional branch, so END does not flow to following instruction
-                self.deferred_noflows[next.ea] = True
-
-                # branch target
-                if insn.ea in self.branch_targets:
-                    targets = self.branch_targets[insn.ea]
-                    target_block = targets[insn.Op1.value]
-                    target_va = target_block['end_offset']
-                    self.deferred_flows[next.ea] = [(next.ea, target_va, idaapi.fl_JF)]
-
-            # conditional branch
             elif insn.itype == self.itype_BR_IF:
+                return self.notify_emu_BR_IF_END(insn, next)
 
-                # BR_IF flows to the END
-                idaapi.add_cref(insn.ea, insn.ea + insn.size, idaapi.fl_F)
-
-                # conditional branch, so there will be a fallthrough flow.
-                # the default behavior of `end` is to fallthrough, so don't change that.
-                pass
-
-                # branch target
-                if insn.ea in self.branch_targets:
-                    targets = self.branch_targets[insn.ea]
-                    target_block = targets[insn.Op1.value]
-                    target_va = target_block['end_offset']
-                    self.deferred_flows[next.ea] = [(next.ea, target_va, idaapi.fl_JF)]
-
-            # branch table, which i haven't seen before
             elif insn.itype in (self.itype_BR_TABLE, ):
-                # noflow?
                 raise NotImplementedError('br table')
 
         # handle cases like:
@@ -663,100 +749,37 @@ class wasm_processor_t(idaapi.processor_t):
         elif insn.itype == self.itype_RETURN and \
              next is not None and \
              next.itype == self.itype_END:
-
-            # the RETURN will fallthrough to END,
-            idaapi.add_cref(insn.ea, insn.ea + insn.size, idaapi.fl_F)
-
-            # but the END will not fallthrough.
-            self.deferred_noflows[next.ea] = True
+            return self.notify_emu_RETURN_END(insn, next)
 
         # handle other RETURN and UNREACHABLE instructions.
         # tbh, not sure how we'd encounter another RETURN, but we'll be safe.
         elif insn.get_canon_feature() & wasm.opcodes.INSN_NO_FLOW:
-            # itype_UNREACHABLE, itype_RETURN
-            # noflow
-            pass
+            return 1
 
         # handle an unconditional branch not at the end of a black.
         elif insn.itype == self.itype_BR:
-            # unconditional branch does not fallthrough flow.
-            pass
-
-            # branch target
-            if insn.ea in self.branch_targets:
-                targets = self.branch_targets[insn.ea]
-                target_block = targets[insn.Op1.value]
-                target_va = target_block['end_offset']
-                idaapi.add_cref(insn.ea, target_va, idaapi.fl_JF)
+            return self.notify_emu_BR(insn)
 
         elif insn.itype == self.itype_BR_TABLE:
             # haven't seen one of these yet, so don't know to handle exactly.
-            # noflow?
             raise NotImplementedError('br table')
 
         # handle a conditional branch not at the end of a block.
         elif insn.itype == self.itype_BR_IF:
-            # fallthrough flow
-            idaapi.add_cref(insn.ea, insn.ea + insn.size, idaapi.fl_F)
+            return self.notify_emu_BR_IF(insn)
 
-            # branch target
-            if insn.ea in self.branch_targets:
-                targets = self.branch_targets[insn.ea]
-                target_block = targets[insn.Op1.value]
-                target_va = target_block['end_offset']
-                idaapi.add_cref(insn.ea, target_va, idaapi.fl_JF)
-
+        # add flows deferred from a prior branch, eg.
+        #
+        #     br $foo
+        #     end
+        #
+        # flows deferred from the BR to the END insn.
         elif insn.itype == self.itype_END:
+            return self.notify_emu_END(insn)
 
-            # add flows deferred from a prior branch, eg.
-            #
-            #     br $foo
-            #     end
-            #
-            # flows deferred from the BR to the END insn.
-            for flow in self.deferred_flows.get(insn.ea, []):
-                idaapi.add_cref(*flow)
-
-            if insn.ea in self.branch_targets:
-                targets = self.branch_targets[insn.ea]
-                block = targets['block']
-                if block['type'] == 'loop':
-                    # end of loop
-
-                    # noflow
-
-                    # branch back to top of loop
-                    target_va = block['offset']
-                    idaapi.add_cref(insn.ea, target_va, idaapi.fl_JF)
-
-                elif block['type'] == 'if':
-                    # end of if
-                    raise NotImplementedError('if')
-
-                elif block['type'] == 'block':
-                    # end of block
-                    # fallthrough flow, unless a deferred noflow from earlier, such as the case:
-                    #
-                    #     return
-                    #     end
-                    #
-                    # the RETURN is the end of the function, so no flow after the END.
-                    if insn.ea not in self.deferred_noflows:
-                        idaapi.add_cref(insn.ea, insn.ea + insn.size, idaapi.fl_F)
-
-                elif block['type'] == 'function':
-                    # end of function
-                    # noflow
-                    pass
-
-                else:
-                    raise RuntimeError('unexpected block type: ' + block['type'])
-
+        # default behavior: fallthrough
         else:
-            # fallthrough flow
             idaapi.add_cref(insn.ea, insn.ea + insn.size, idaapi.fl_F)
-
-        return 1
 
     @ida_entry
     def out_mnem(self, ctx):
