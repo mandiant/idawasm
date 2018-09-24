@@ -9,8 +9,17 @@ Features:
   - code and data cross references
   - globals, function parameters, local variables, etc. can be renamed
   - auto-comment hint suport
+  
 
+![load-wasm](img/load-wasm.png)
 
+![graph-mode](img/graph-mode.png)
+
+![render-prototype](img/render-prototype.png)
+
+![drefs](img/drefs.png)
+
+  
 ## installation
 
 There are three steps to install this loader and processor:
