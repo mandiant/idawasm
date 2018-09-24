@@ -16,7 +16,7 @@ Features:
 ![load-wasm](img/load-wasm.png)
 
 
-#### reconstructions control flow
+#### reconstructs control flow
 
 ![graph-mode](img/graph-mode.png)
 
