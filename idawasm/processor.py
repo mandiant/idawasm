@@ -457,10 +457,9 @@ class wasm_processor_t(idaapi.processor_t):
         else:
             return self._render_type(function['type'], name=function['name'])
 
-    @ida_entry
-    def notify_newfile(self, filename):
+    def load(self):
         '''
-        handle loading a new file.
+        load the state of the processor and analysis from the segments.
 
         the processor object may not be re-created, so we do our initializiation here.
         initialize the following fields:
@@ -473,8 +472,6 @@ class wasm_processor_t(idaapi.processor_t):
           - self.globals
           - self.branch_targets
         '''
-        logger.info('new file: %s', filename)
-
         logger.info('parsing sections')
         buf = []
         for ea in idautils.Segments():
@@ -522,6 +519,38 @@ class wasm_processor_t(idaapi.processor_t):
 
         self.deferred_noflows = {}
         self.deferred_flows = {}
+
+    @ida_entry
+    def notify_newfile(self, filename):
+        '''
+        handle file being analyzed for the first time.
+        '''
+        logger.info('new file: %s', filename)
+        self.load()
+
+    @ida_entry
+    def notify_oldfile(self, filename):
+        '''
+        handle file loaded from existing .idb database.
+        '''
+        logger.info('existing database: %s', filename)
+        self.load()
+
+    @ida_entry
+    def notify_savebase(self):
+        '''
+        the database is being saved.
+        '''
+        logger.info('saving wasm processor state.')
+
+    @ida_entry
+    def notify_endbinary(self, ok):
+        """
+         After loading a binary file
+         args:
+          ok - file loaded successfully?
+        """
+        logger.info('wasm module loaded.')
 
     @ida_entry
     def notify_get_autocmt(self, insn):
