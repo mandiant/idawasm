@@ -715,7 +715,7 @@ class wasm_processor_t(idaapi.processor_t):
         next = idautils.DecodeInstruction(insn.ea + insn.size)
 
         # add drefs to globals
-        for i in range(3):
+        for i in range(min(3, len(insn))):
             op = insn[i]
             if not (op.type == idaapi.o_imm and op.specval == WASM_GLOBAL):
                 continue
