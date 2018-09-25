@@ -485,6 +485,9 @@ class wasm_processor_t(idaapi.processor_t):
         logger.info('parsing types')
         self.types = self._parse_types()
 
+        logger.info('parsing globals')
+        self.globals = self._parse_globals()
+
         logger.info('parsing functions')
         self.functions = self._parse_functions()
 
@@ -498,10 +501,17 @@ class wasm_processor_t(idaapi.processor_t):
             if 'offset' in f
         }
 
+        logger.info('computing branch targets')
+        self.branch_targets = self._compute_branch_targets()
+
+        self.deferred_noflows = {}
+        self.deferred_flows = {}
+
         for function in self.functions.values():
             name = function['name'].encode('utf-8')
             if 'offset' in function:
                 idc.MakeName(function['offset'], name)
+                # notify_emu will be invoked from here.
                 idc.MakeCode(function['offset'])
                 idc.MakeFunction(function['offset'], function['offset'] + function['size'])
 
@@ -511,15 +521,6 @@ class wasm_processor_t(idaapi.processor_t):
                 idc.add_entry(function['index'], function['offset'], name, True)
 
             # TODO: idc.add_entry for the start routine. need an example of this.
-
-        logger.info('parsing globals')
-        self.globals = self._parse_globals()
-
-        logger.info('computing branch targets')
-        self.branch_targets = self._compute_branch_targets()
-
-        self.deferred_noflows = {}
-        self.deferred_flows = {}
 
     @ida_entry
     def notify_newfile(self, filename):
