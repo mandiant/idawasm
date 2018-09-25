@@ -20,6 +20,7 @@ import idautils
 
 # from this project
 import idawasm.const
+import idawasm.common
 
 
 logger = logging.getLogger(__name__)
