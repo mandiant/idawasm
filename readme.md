@@ -42,13 +42,13 @@ There are three steps to install this loader and processor:
 2. manually install the WebAssembly file loader:
     
 ```
-    mv loaders\wasm_loader.py %IDADIR%\loaders\wasm.py
+    mv loaders\webassembly.py %IDADIR%\loaders\webassembly.py
 ```
 
 3. manually install the WebAssembly processor:
     
 ```
-    mv procs\wasm_processor.py %IDADIR%\procs\wasm.py
+    mv procs\webassembly.py %IDADIR%\procs\webassembly.py
 ```
 
 Whenever you update this project, you'll need to update the python module, but shouldn't have to touch the loader and processor files.
