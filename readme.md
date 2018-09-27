@@ -28,6 +28,10 @@ Features:
 
 ![drefs](img/drefs.png)
 
+#### detect function frame layout (for LLVM-compiled binaries)
+
+![drefs](img/frame.png)
+
   
 ## installation
 
@@ -42,16 +46,18 @@ There are three steps to install this loader and processor:
 2. manually install the WebAssembly file loader:
     
 ```
-    mv loaders\webassembly.py %IDADIR%\loaders\webassembly.py
+    mv loaders\wasm_loader.py %IDADIR%\loaders\wasm_loader.py
 ```
 
 3. manually install the WebAssembly processor:
     
 ```
-    mv procs\webassembly.py %IDADIR%\procs\webassembly.py
+    mv procs\wasm_proc.py %IDADIR%\procs\wasm_proc.py
 ```
 
 Whenever you update this project, you'll need to update the python module, but shouldn't have to touch the loader and processor files.
+
+This plugin was developed against IDA 7.1, but probably works with IDA 7.0+.
 
 
 ## acknowledgements
