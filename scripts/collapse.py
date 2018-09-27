@@ -495,15 +495,16 @@ def main():
         globals_[i] = ida_name.get_name(offset)
 
     frame = {}
-    names = set([])
-    for i in xrange(idc.GetStrucSize(strucid)):
-        name = idc.GetMemberName(strucid, i)
-        if not name:
-            continue
-        if name in names:
-            continue
-        frame[i] = name
-        names.add(name)
+    if f.frame != idc.BADADDR:
+        names = set([])
+        for i in range(idc.GetStrucSize(f.frame)):
+            name = idc.GetMemberName(f.frame, i)
+            if not name:
+                continue
+            if name in names:
+                continue
+            frame[i] = name
+            names.add(name)
 
     emu = Emulator(buf)
     emu.run()
