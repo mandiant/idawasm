@@ -13,18 +13,49 @@ import ida_frame
 import ida_bytes
 import ida_struct
 
+import idawasm.analysis
+
 
 logger = logging.getLogger(__name__)
 
 
-class LLVMAnalyzer(object):
-    def __init__(self, proc):
-        self.proc = proc
+class LLVMAnalyzer(idawasm.analysis.Analyzer):
+    '''
+    analyzer specific to wasmception/LLVM that recongizing function prologues.
+    from there, creates function frame structures, and marks up references.
+    '''
 
-    # min size of the example prologue
-    MIN_PROLOGUE_SIZE = 21
+    # estimated size of the llvm function prologue.
+    PROLOGUE_SIZE = 21
+
+    def __init__(self, *args):
+        super(LLVMAnalyzer, self).__init__(*args)
+
+    def taste(self):
+        '''
+        I hhaven't identified where LLVM might leave a compiler stamp,
+         therefore, let's detect LLVM code signatures.
+
+        does at least one function appear to have an LLVM-style function prologue?
+        '''
+        for function in functions.values():
+            if self.has_llvm_prologue(function):
+                return True
+        return False
+
+    def analyze(self):
+        self.analyze_function_frames(self.proc.functions)
 
     def is_store(self, op):
+        '''
+        does the given instruction appear to be a STORE variant?
+
+        args:
+          op (wasm.opcode.Opcode): the instruction opcode.
+
+        returns:
+          bool: True if a STORE variant.
+        '''
         return op.id in (wasm.opcodes.OP_I32_STORE,
                          wasm.opcodes.OP_I64_STORE,
                          wasm.opcodes.OP_F32_STORE,
@@ -36,6 +67,15 @@ class LLVMAnalyzer(object):
                          wasm.opcodes.OP_I64_STORE32)
 
     def get_store_size(self, insn):
+        '''
+        fetch the type and size of the given STORE instruction.
+
+        args:
+          insn (wasm.decode.Instruction): the instruction.
+
+        returns:
+          str: String identifier for the store size and type, like `i32`.
+        '''
         return {wasm.opcodes.OP_I32_STORE:   'i32',
                 wasm.opcodes.OP_I64_STORE:   'i64',
                 wasm.opcodes.OP_F32_STORE:   'f32',
@@ -54,7 +94,12 @@ class LLVMAnalyzer(object):
             code:01F5 20 00                   get_local           $param0
             code:01F7 36 02 14                i32.store           0x14, align:2
 
+        and extract metadata like:
+          - frame offset
+          - store size
+
         args:
+          function (Dict[str, any]): function instance.
           frame_pointer (int): local variable index of the frame pointer.
           bc (List[wasm.Instruction]): sequence of at least three instructions.
 
@@ -64,6 +109,7 @@ class LLVMAnalyzer(object):
             - element_size (str): size of element being written.
             - access_type (str): the string "store".
             - offset (int): offset into the bitcode of the reference instruction.
+            - parameter (int, optional): the parameter index being loaded.
 
         raises:
           ValueError: if the given bc does not contain a frame store.
@@ -92,7 +138,17 @@ class LLVMAnalyzer(object):
 
         return ret
 
+
     def is_load(self, op):
+        '''
+        does the given instruction appear to be a LOAD variant?
+
+        args:
+          op (wasm.opcode.Opcode): the instruction opcode.
+
+        returns:
+          bool: True if a LOAD variant.
+        '''
         return op.id in (wasm.opcodes.OP_I32_LOAD,
                          wasm.opcodes.OP_I64_LOAD,
                          wasm.opcodes.OP_F32_LOAD,
@@ -109,6 +165,15 @@ class LLVMAnalyzer(object):
                          wasm.opcodes.OP_I64_LOAD32_S)
 
     def get_load_size(self, insn):
+        '''
+        fetch the type and size of the given LOAD instruction.
+
+        args:
+          insn (wasm.decode.Instruction): the instruction.
+
+        returns:
+          str: String identifier for the load size and type, like `i32`.
+        '''
         return {wasm.opcodes.OP_I32_LOAD:     'i32',
                 wasm.opcodes.OP_I64_LOAD:     'i64',
                 wasm.opcodes.OP_F32_LOAD:     'f32',
@@ -125,10 +190,31 @@ class LLVMAnalyzer(object):
                 wasm.opcodes.OP_I64_LOAD32_S: 'i32'}[insn.op.id]
 
     def get_frame_load(self, function, frame_pointer, bc):
-        # find patterns like:
-        #
-        #     code:0245 20 06                   get_local           $local6
-        #     code:0247 28 02 14                i32.load            0x14, align:2
+        '''
+        find patterns like::
+
+            code:0245 20 06                   get_local           $local6
+            code:0247 28 02 14                i32.load            0x14, align:2
+
+        and extract metadata like:
+          - frame offset
+          - load size
+
+        args:
+          function (Dict[str, any]): function instance.
+          frame_pointer (int): local variable index of the frame pointer.
+          bc (List[wasm.Instruction]): sequence of at least three instructions.
+
+        returns:
+          Dict[Str, any]: frame store metadata, including:
+            - frame_offset (int): offset into frame of load.
+            - element_size (str): size of element being read.
+            - access_type (str): the string "load".
+            - offset (int): offset into the bitcode of the reference instruction.
+
+        raises:
+          ValueError: if the given bc does not contain a frame store.
+        '''
         if bc[0].op.id != wasm.opcodes.OP_GET_LOCAL:
             raise ValueError('not a load')
 
@@ -147,8 +233,19 @@ class LLVMAnalyzer(object):
 
     def find_function_frame_references(self, function, frame_pointer):
         '''
+        scan the given instruction for LOAD or STOREs to the function frame.
+
+        args:
+          function (Dict[str, any]): function instance.
+          frame_pointer (int): local variable index of the frame pointer.
+
         returns:
-          Dict[int, Set[Dict[str, any]]]: mapping from frame_offset to set of frame references.
+          Dict[int, Set[Dict[str, any]]]: mapping from frame_offset to set of frame references with fields:
+            - frame_offset (int): offset into frame of access.
+            - element_size (str): size of element being accessed.
+            - access_type (str): type of reference, either "load" or "store".
+            - offset (int): offset into the bitcode of the reference instruction.
+            - parameter (int, optional): the parameter index being loaded.
         '''
         buf = ida_bytes.get_many_bytes(function['offset'], function['size'])
         bc = list(wasm.decode.decode_bytecode(buf))
@@ -181,7 +278,45 @@ class LLVMAnalyzer(object):
 
         return references
 
+    def has_llvm_prologue(self, function):
+        '''
+        does the given function appear to have an LLVM-style function prologue?
+
+        args:
+          function (Dict[str, any]): function instance.
+
+        returns:
+          bool: if the function seems to have an LLVM-style function prologue.
+        '''
+        if function['imported']:
+            return False
+
+        if function['size'] <= self.PROLOGUE_SIZE:
+            return False
+
+        prologue = ida_bytes.get_many_bytes(function['offset'], self.PROLOGUE_SIZE)
+        prologue_bc = list(itertools.islice(wasm.decode.decode_bytecode(prologue), 8))
+        prologue_mnems = list(map(lambda bc: bc.op.id, prologue_bc))
+
+        # pattern match on the LLVM function prologue.
+        # obviously brittle.
+        return prologue_mnems == [wasm.opcodes.OP_GET_GLOBAL,  # global frame pointer
+                                  wasm.opcodes.OP_SET_LOCAL,
+                                  wasm.opcodes.OP_I32_CONST,   # function frame size
+                                  wasm.opcodes.OP_SET_LOCAL,
+                                  wasm.opcodes.OP_GET_LOCAL,
+                                  wasm.opcodes.OP_GET_LOCAL,
+                                  wasm.opcodes.OP_I32_SUB,
+                                  wasm.opcodes.OP_SET_LOCAL]:   # frame pointer
+
+
     def analyze_function_frame(self, function):
+        '''
+        inspect the given function to determine the frame layout and set references appropriately.
+
+        args:
+          function (Dict[str, any]): function instance.
+        '''
         # given a function prologue like the following:
         #
         #     23 80 80 80 80 00       get_global          $global0
@@ -194,25 +329,16 @@ class LLVMAnalyzer(object):
         #     21 06                   set_local           $local6
         #
         # recognize that the function frame is 0x20 bytes.
-        prologue = ida_bytes.get_many_bytes(function['offset'], self.MIN_PROLOGUE_SIZE)
-        prologue_bc = list(itertools.islice(wasm.decode.decode_bytecode(prologue), 8))
-        prologue_mnems = list(map(lambda bc: bc.op.id, prologue_bc))
 
-        # pattern match on the LLVM function prologue.
-        # obviously brittle.
-        if prologue_mnems != [wasm.opcodes.OP_GET_GLOBAL,  # global frame pointer
-                              wasm.opcodes.OP_SET_LOCAL,
-                              wasm.opcodes.OP_I32_CONST,   # function frame size
-                              wasm.opcodes.OP_SET_LOCAL,
-                              wasm.opcodes.OP_GET_LOCAL,
-                              wasm.opcodes.OP_GET_LOCAL,
-                              wasm.opcodes.OP_I32_SUB,
-                              wasm.opcodes.OP_SET_LOCAL]:   # frame pointer
+        if not has_llvm_prologue(function):
             return
 
-        global_frame_pointer = prologue_bc[0].imm.global_index
-        frame_size = prologue_bc[2].imm.value
-        local_frame_pointer = prologue_bc[7].imm.local_index
+        buf = ida_bytes.get_many_bytes(function['offset'], self.PROLOGUE_SIZE)
+        bc = list(itertools.islice(wasm.decode.decode_bytecode(buf), 8))
+
+        global_frame_pointer = bc[0].imm.global_index
+        frame_size = bc[2].imm.value
+        local_frame_pointer = bc[7].imm.local_index
 
         # add a frame structure to the function
         f = ida_funcs.get_func(function['offset'])
@@ -230,6 +356,7 @@ class LLVMAnalyzer(object):
                              '$frame_pointer',
                              '')
 
+        # define the frame structure layout by scanning for references within this function
         frame_references = self.find_function_frame_references(function, local_frame_pointer)
         for frame_offset, refs in frame_references.items():
 
@@ -273,6 +400,8 @@ class LLVMAnalyzer(object):
         # mark struct references
         for refs in frame_references.values():
             for ref in refs:
+                # set type of operand 0 to function frame structure offset
+                # ref: https://github.com/idapython/src/blob/a3855ab969fd16758b3de007525feeba3a920344/tools/inject_pydoc/bytes.py#L5
                 insn = ida_ua.insn_t()
                 if not ida_ua.decode_insn(insn, ref['offset']):
                     continue
@@ -282,14 +411,11 @@ class LLVMAnalyzer(object):
                 ida_bytes.op_stroff(insn, 0, path.cast(), 1, 0)
 
     def analyze_function_frames(self, functions):
+        '''
+        inspect the given functions to determine the frame layouts and set references appropriately.
+
+        args:
+          functions (List[Dict[str, any]]): function instances.
+        '''
         for function in functions.values():
-            if function['imported']:
-                continue
-
-            if function['size'] <= self.MIN_PROLOGUE_SIZE:
-                continue
-
             self.analyze_function_frame(function)
-
-    def analyze(self):
-        self.analyze_function_frames(self.proc.functions)

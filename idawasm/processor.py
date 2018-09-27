@@ -532,9 +532,14 @@ class wasm_processor_t(idaapi.processor_t):
         self.load()
 
         for Analyzer in (idawasm.analysis.llvm.LLVMAnalyzer, ):
-            logger.debug('running analyzer: %s', Analyzer.__name__)
             ana = Analyzer(self)
-            ana.analyze()
+
+            if ana.taste():
+                logger.debug('%s analyzing', Analyzer.__name__)
+                ana.analyze()
+            else:
+                logger.debug('%s declined analysis', Analyzer.__name__)
+
 
     @ida_entry
     def notify_oldfile(self, filename):
