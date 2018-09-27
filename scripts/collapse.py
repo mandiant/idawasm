@@ -198,6 +198,7 @@ def reduce(value):
 
 
 def render_local(index, ctx={}):
+
     name = '$local{index:d}'.format(**locals())
     if name in ctx.get('regvars', {}):
         return ctx['regvars'][name]
@@ -206,7 +207,11 @@ def render_local(index, ctx={}):
 
 
 def render_global(index, ctx={}):
-    return '$global{index:d}'.format(**locals())
+    name = '$global{index:d}'.format(**locals())
+    if name in ctx.get('globals', {}):
+        return ctx['globals'][name]
+    else:
+        return name
 
 
 def render(value, ctx={}):
@@ -492,7 +497,7 @@ def main():
 
     globals_ = {}
     for i, offset in netnode.Netnode('$ wasm.offsets')['globals'].items():
-        globals_[i] = ida_name.get_name(offset)
+        globals_['$global' + i] = ida_name.get_name(offset)
 
     frame = {}
     if f.frame != idc.BADADDR:
