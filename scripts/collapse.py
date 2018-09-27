@@ -109,7 +109,7 @@ class GlobalVariable(object):
 
 
 def is_frame_pointer(value, ctx={}):
-    return render(value, ctx=ctx) == 'frame_pointer'
+    return render(value, ctx=ctx) == '$frame_pointer'
 
 
 class Memory(object):
