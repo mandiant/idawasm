@@ -524,6 +524,7 @@ class wasm_processor_t(idaapi.processor_t):
             # TODO: idc.add_entry for the start routine. need an example of this.
 
         for Analyzer in (idawasm.analysis.llvm.LLVMAnalyzer, ):
+            logger.debug('running analyzer: %s', Analyzer.__name__)
             ana = Analyzer(self)
             ana.analyze()
 

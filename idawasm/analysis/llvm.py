@@ -5,6 +5,8 @@ import collections
 import wasm
 import wasm.opcodes
 
+import ida_ua
+import ida_pro
 import ida_name
 import ida_funcs
 import ida_frame
@@ -58,8 +60,10 @@ class LLVMAnalyzer(object):
 
         returns:
           Dict[Str, any]: frame store metadata, including:
-            - frame_offset: offset into frame of store.
-            - element_size: size of element being written.
+            - frame_offset (int): offset into frame of store.
+            - element_size (str): size of element being written.
+            - access_type (str): the string "store".
+            - offset (int): offset into the bitcode of the reference instruction.
 
         raises:
           ValueError: if the given bc does not contain a frame store.
@@ -77,6 +81,7 @@ class LLVMAnalyzer(object):
             raise ValueError('not a store')
 
         return {
+            'offset': bc[0].len + bc[1].len,
             'access_type': 'store',
             'frame_offset': bc[2].imm.offset,
             'element_size': self.get_store_size(bc[2])
@@ -129,6 +134,7 @@ class LLVMAnalyzer(object):
             raise ValueError('not a load')
 
         return {
+            'offset': bc[0].len,
             'access_type': 'load',
             'frame_offset': bc[1].imm.offset,
             'element_size': self.get_load_size(bc[1])
@@ -142,6 +148,7 @@ class LLVMAnalyzer(object):
         buf = ida_bytes.get_many_bytes(function['offset'], function['size'])
         bc = list(wasm.decode.decode_bytecode(buf))
 
+        offset = function['offset']
         SLICE_SIZE = 3
         references = collections.defaultdict(lambda: list())
         for i in range(len(bc) - SLICE_SIZE - 1):
@@ -150,18 +157,22 @@ class LLVMAnalyzer(object):
             try:
                 load = self.get_frame_load(frame_pointer, insns)
             except ValueError:
-                continue
+                pass
             else:
-                logger.debug('found function frame load at 0x%x', function['offset'] + i)
+                load['offset'] += offset
+                logger.debug('found function frame load at 0x%X', load['offset'])
                 references[load['frame_offset']].append(load)
 
             try:
                 store = self.get_frame_store(frame_pointer, insns)
             except ValueError:
-                continue
+                pass
             else:
-                logger.debug('found function frame store at 0x%x', function['offset'] + i)
+                store['offset'] += offset
+                logger.debug('found function frame store at 0x%X', store['offset'])
                 references[store['frame_offset']].append(store)
+
+            offset += bc[i].len
 
         return references
 
@@ -198,12 +209,13 @@ class LLVMAnalyzer(object):
         frame_size = prologue_bc[2].imm.value
         local_frame_pointer = prologue_bc[7].imm.local_index
 
+        # add a frame structure to the function
         f = ida_funcs.get_func(function['offset'])
         ida_frame.add_frame(f, 0x0, 0x0, frame_size)
-        ida_struct.set_struc_name(f.frame, function['name'] + '_frame')
+        ida_struct.set_struc_name(f.frame, ('frame%d' % function['index']).encode('utf-8'))
 
-        # ensure $frame_stack is named appropriately
-        #ida_name.set_name(self.proc.globals[global_frame_pointer]['offset'], '$frame_stack')
+        # ensure global variable $frame_stack is named appropriately
+        ida_name.set_name(self.proc.globals[global_frame_pointer]['offset'], '$frame_stack')
 
         # re-map local variable to $frame_pointer
         ida_frame.add_regvar(f,
@@ -214,13 +226,10 @@ class LLVMAnalyzer(object):
                              '')
 
         frame_references = self.find_function_frame_references(function, local_frame_pointer)
-        for refs in frame_references.values():
-            # guaranteed to be at least one reference
-            ref = refs[0]
-            frame_offset = ref['frame_offset']
+        for frame_offset, refs in frame_references.items():
             member_name = 'field_%x' % (frame_offset)
 
-            # pick largest element size
+            # pick largest element size for the element type
             flags = 0
             size = 0
             for ref in refs:
@@ -237,6 +246,9 @@ class LLVMAnalyzer(object):
                      'i64': 8,
                      'f32': 4,
                      'f64': 8,}[ref['element_size']]
+
+                # by luck, FF_BYTE < FF_WORD < FF_DWORD < FF_QWORD,
+                # so we can order flag values.
                 if fl > flags:
                     flags = fl
                     size = s
@@ -250,6 +262,15 @@ class LLVMAnalyzer(object):
                                         size)
 
         # mark struct references
+        for refs in frame_references.values():
+            for ref in refs:
+                insn = ida_ua.insn_t()
+                if not ida_ua.decode_insn(insn, ref['offset']):
+                    continue
+
+                path = ida_pro.tid_array(1)
+                path[0] = f.frame
+                ida_bytes.op_stroff(insn, 0, path.cast(), 1, 0)
 
     def analyze_function_frames(self, functions):
         for function in functions.values():
@@ -262,5 +283,4 @@ class LLVMAnalyzer(object):
             self.analyze_function_frame(function)
 
     def analyze(self):
-        #self.analyze_function_frames(self.proc.functions)
-        pass
+        self.analyze_function_frames(self.proc.functions)
