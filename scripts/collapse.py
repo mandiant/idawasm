@@ -481,18 +481,15 @@ def main():
 
     # find mappings from "$localN" to "custom_name"
     regvars = {}
-    for i in range(f.regvarqty):
+    for i in range(0x1000):
         regvar = idaapi.find_regvar(f, sel_start, '$local%d' % (i))
         if regvar is None:
             continue
         regvars[regvar.canon] = regvar.user
 
-    # until our processor can automatically parse the frame layout,
-    # assume function frame structure is named "funcname_frame"
-    if f.frame != idc.BADADDR:
-        strucid = f.frame
-    else:
-        strucid = idc.GetStrucIdByName(idc.get_func_name(sel_start) + '_frame')
+        if len(regvars) >= f.regvarqty:
+            break
+
     globals_ = {}
     for i, offset in netnode.Netnode('$ wasm.offsets')['globals'].items():
         globals_[i] = ida_name.get_name(offset)
