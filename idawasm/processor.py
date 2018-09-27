@@ -12,6 +12,7 @@ import functools
 # from pip
 import wasm
 import wasm.wasmtypes
+import netnode
 
 # from IDA
 import idc
@@ -530,6 +531,10 @@ class wasm_processor_t(idaapi.processor_t):
         '''
         logger.info('new file: %s', filename)
         self.load()
+
+        wasm_nn = netnode.Netnode('$ wasm.offsets')
+        wasm_nn['functions'] = {f['index']: f['offset'] for f in self.functions.values() if 'offset' in f}
+        wasm_nn['globals'] = {g['index']: g['offset'] for g in self.globals.values() if 'offset' in g}
 
         for Analyzer in (idawasm.analysis.llvm.LLVMAnalyzer, ):
             ana = Analyzer(self)

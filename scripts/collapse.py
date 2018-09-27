@@ -4,6 +4,7 @@ import collections
 import wasm
 import wasm.decode
 import wasm.opcodes
+import netnode
 
 import idaapi
 import ida_bytes
@@ -463,6 +464,9 @@ def main():
         strucid = f.frame
     else:
         strucid = idc.GetStrucIdByName(idc.get_func_name(sel_start) + '_frame')
+    globals_ = {}
+    for i, offset in netnode.Netnode('$ wasm.offsets')['globals'].items():
+        globals_[i] = ida_name.get_name(offset)
 
     frame = {}
     names = set([])
@@ -480,6 +484,7 @@ def main():
     print(emu.render(ctx={
         'regvars': regvars,
         'frame': frame,
+        'globals': globals_,
     }))
 
 
