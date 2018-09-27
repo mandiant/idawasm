@@ -46,7 +46,7 @@ class LLVMAnalyzer(object):
                 wasm.opcodes.OP_I64_STORE16: 'i16',
                 wasm.opcodes.OP_I64_STORE32: 'i32'}[insn.op.id]
 
-    def get_frame_store(self, frame_pointer, bc):
+    def get_frame_store(self, function, frame_pointer, bc):
         '''
         find patterns like::
 
@@ -80,12 +80,17 @@ class LLVMAnalyzer(object):
         if bc[0].imm.local_index != frame_pointer:
             raise ValueError('not a store')
 
-        return {
+        ret = {
             'offset': bc[0].len + bc[1].len,
             'access_type': 'store',
             'frame_offset': bc[2].imm.offset,
             'element_size': self.get_store_size(bc[2])
         }
+
+        if bc[1].imm.local_index < function['type']['param_count']:
+            ret['parameter'] = bc[1].imm.local_index
+
+        return ret
 
     def is_load(self, op):
         return op.id in (wasm.opcodes.OP_I32_LOAD,
@@ -119,7 +124,7 @@ class LLVMAnalyzer(object):
                 wasm.opcodes.OP_I64_LOAD32_U: 'i32',
                 wasm.opcodes.OP_I64_LOAD32_S: 'i32'}[insn.op.id]
 
-    def get_frame_load(self, frame_pointer, bc):
+    def get_frame_load(self, function, frame_pointer, bc):
         # find patterns like:
         #
         #     code:0245 20 06                   get_local           $local6
@@ -155,7 +160,7 @@ class LLVMAnalyzer(object):
             insns = bc[i:i+SLICE_SIZE]
 
             try:
-                load = self.get_frame_load(frame_pointer, insns)
+                load = self.get_frame_load(function, frame_pointer, insns)
             except ValueError:
                 pass
             else:
@@ -164,7 +169,7 @@ class LLVMAnalyzer(object):
                 references[load['frame_offset']].append(load)
 
             try:
-                store = self.get_frame_store(frame_pointer, insns)
+                store = self.get_frame_store(function, frame_pointer, insns)
             except ValueError:
                 pass
             else:
@@ -227,7 +232,11 @@ class LLVMAnalyzer(object):
 
         frame_references = self.find_function_frame_references(function, local_frame_pointer)
         for frame_offset, refs in frame_references.items():
+
             member_name = 'field_%x' % (frame_offset)
+            for ref in refs:
+                if 'parameter' in ref:
+                    member_name = 'param%d' % (ref['parameter'])
 
             # pick largest element size for the element type
             flags = 0
