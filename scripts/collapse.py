@@ -445,13 +445,16 @@ class Emulator:
 
     def render(self, ctx={}):
         ret = []
+
         if self.globals:
+            ret.append('globals:')
             for g in sorted(self.globals.keys()):
-                ret.append('$global{g:d}: '.format(**locals()) + render(self.globals[g], ctx=ctx))
+                ret.append('  ' + render_global(g, ctx) + ': ' + render(self.globals[g], ctx))
 
         if self.locals:
+            ret.append('locals:')
             for l in sorted(self.locals.keys()):
-                ret.append('$local{l:d}: '.format(**locals()) + render(self.locals[l], ctx=ctx))
+                ret.append('  ' + render_local(l, ctx) + ': ' + render(self.locals[l], ctx))
 
         if self.stack:
             ret.append('stack:')
