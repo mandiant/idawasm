@@ -21,6 +21,7 @@ import idautils
 # from this project
 import idawasm.const
 import idawasm.common
+import idawasm.analysis.llvm
 
 
 logger = logging.getLogger(__name__)
@@ -521,6 +522,10 @@ class wasm_processor_t(idaapi.processor_t):
                 idc.add_entry(function['index'], function['offset'], name, True)
 
             # TODO: idc.add_entry for the start routine. need an example of this.
+
+        for Analyzer in (idawasm.analysis.llvm.LLVMAnalyzer, ):
+            ana = Analyzer(self)
+            ana.analyze()
 
     @ida_entry
     def notify_newfile(self, filename):
