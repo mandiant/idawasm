@@ -14,7 +14,7 @@ class Analyzer:
         '''
         self.proc = proc
 
-    @abc.abstracemethod
+    @abc.abstractmethod
     def taste(self):
         '''
         detect if this analyzer should run on the current database.
@@ -23,7 +23,7 @@ class Analyzer:
           bool: True if the analyzer should be run.
         '''
 
-    @abc.abstracemethod
+    @abc.abstractmethod
     def analyze(self):
         '''
         perform the analysis on the current database.

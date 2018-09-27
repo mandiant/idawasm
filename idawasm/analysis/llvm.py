@@ -38,7 +38,7 @@ class LLVMAnalyzer(idawasm.analysis.Analyzer):
 
         does at least one function appear to have an LLVM-style function prologue?
         '''
-        for function in functions.values():
+        for function in self.proc.functions.values():
             if self.has_llvm_prologue(function):
                 return True
         return False
@@ -307,7 +307,7 @@ class LLVMAnalyzer(idawasm.analysis.Analyzer):
                                   wasm.opcodes.OP_GET_LOCAL,
                                   wasm.opcodes.OP_GET_LOCAL,
                                   wasm.opcodes.OP_I32_SUB,
-                                  wasm.opcodes.OP_SET_LOCAL]:   # frame pointer
+                                  wasm.opcodes.OP_SET_LOCAL]   # frame pointer
 
 
     def analyze_function_frame(self, function):
@@ -330,7 +330,7 @@ class LLVMAnalyzer(idawasm.analysis.Analyzer):
         #
         # recognize that the function frame is 0x20 bytes.
 
-        if not has_llvm_prologue(function):
+        if not self.has_llvm_prologue(function):
             return
 
         buf = ida_bytes.get_many_bytes(function['offset'], self.PROLOGUE_SIZE)
