@@ -10,23 +10,25 @@ import idaapi
 import ida_bytes
 
 
-logger = logging.getLogger('collapse-wasm')
+logger = logging.getLogger('wasm-emu')
 
 
 
 def get_type_sort_order(v):
     '''
     when ordering a list of (possibly complex) values, prefer:
-      binary-op < memory < local-var < i32
+      binary-op < memory < global < local-var < i32
     '''
     if isinstance(v, BinaryOperation):
         return 1
     elif isinstance(v, Memory):
         return 2
-    elif isinstance(v, LocalVariable):
+    elif isinstance(v, GlobalVariable):
         return 3
-    elif isinstance(v, I32):
+    elif isinstance(v, LocalVariable):
         return 4
+    elif isinstance(v, I32):
+        return 5
     else:
         raise ValueError('unexpected value type')
 
@@ -49,6 +51,9 @@ def cmp(a, b):
 
     elif isinstance(a, LocalVariable):
         return a.local_index < b.local_index
+
+    elif isinstance(a, GlobalVariable):
+        return a.global_index < b.global_index
 
     elif isinstance(a, Memory):
         return cmp(a.address, b.address)
@@ -91,6 +96,16 @@ class LocalVariable(object):
     def __lt__(self, other):
         return cmp(self, other)
 
+
+class GlobalVariable(object):
+    def __init__(self, global_index):
+        self.global_index = global_index
+
+    def render(self, ctx={}):
+        return '{g}'.format(g=render_global(self.global_index, ctx=ctx))
+
+    def __lt__(self, other):
+        return cmp(self, other)
 
 
 def is_frame_pointer(value, ctx={}):
@@ -196,7 +211,7 @@ def render_global(index, ctx={}):
 
 def render(value, ctx={}):
     value = reduce(value)
-    if isinstance(value, (I32, LocalVariable, Memory)):
+    if isinstance(value, (I32, LocalVariable, GlobalVariable, Memory)):
         return reduce(value).render(ctx=ctx)
     # render `(frame_pointer + struct_offset)`
     # as `frame_pointer.fieldname`
@@ -243,6 +258,18 @@ class Emulator:
             v = self.locals[insn.imm.local_index]
         except KeyError:
             v = LocalVariable(insn.imm.local_index)
+        self.push(v)
+
+    def handle_SET_GLOBAL(self, insn):
+        v = self.pop()
+        logger.debug('globals: set %s: %s', render_global(insn.imm.global_index), render(v))
+        self.globals[insn.imm.global_index] = v
+
+    def handle_GET_GLOBAL(self, insn):
+        try:
+            v = self.globals[insn.imm.global_index]
+        except KeyError:
+            v = GlobalVariable(insn.imm.global_index)
         self.push(v)
 
     def handle_I32_ADD(self, insn):
@@ -402,6 +429,8 @@ class Emulator:
             wasm.opcodes.OP_I32_STORE8: self.handle_I32_STORE8,
             wasm.opcodes.OP_SET_LOCAL: self.handle_SET_LOCAL,
             wasm.opcodes.OP_GET_LOCAL: self.handle_GET_LOCAL,
+            wasm.opcodes.OP_SET_GLOBAL: self.handle_SET_GLOBAL,
+            wasm.opcodes.OP_GET_GLOBAL: self.handle_GET_GLOBAL,
         }.get(insn.op.id, self.handle_DEFAULT)
         handler(insn)
 
