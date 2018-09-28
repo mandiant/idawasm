@@ -1,3 +1,25 @@
+'''
+IDA Pro plugin that emulates WebAssembly instructions and shows their effects.
+
+Usage:
+  1. Select a sequence of instructions in the disassembly view.
+  2. Run this script.
+  3. Review the output view. You'll see results like this:
+
+      globals:
+        $frame_stack: ($frame_stack - 0x40)
+      locals:
+        $local5: $frame_stack
+        $local6: 0x40
+        $frame_pointer: ($frame_stack - 0x40)
+        $local8: 0x0
+
+Notes:
+
+This plugin supports a subset of the WebAssembly opcodes.
+Currently it does not implement branching or comparison instructions.
+Therefore, you should select instructions within a single basic block.
+'''
 import logging
 import collections
 
@@ -224,7 +246,7 @@ def render(value, ctx={}):
           and is_frame_pointer(value.lhs, ctx=ctx)
           and isinstance(value.rhs, I32)
           and value.rhs.value in ctx.get('frame', {})):
-        return 'frame_pointer.{field}'.format(field=ctx['frame'][value.rhs.value])
+        return '$frame.{field}'.format(field=ctx['frame'][value.rhs.value])
     elif isinstance(value, BinaryOperation):
         return reduce(value).render(ctx=ctx)
     else:
