@@ -521,7 +521,7 @@ def main():
             break
 
     globals_ = {}
-    for i, offset in netnode.Netnode('$ wasm.offsets')['globals'].items():
+    for i, offset in netnode.Netnode('$ wasm.offsets')get('globals', {}).items():
         globals_['$global' + i] = ida_name.get_name(offset)
 
     frame = {}
