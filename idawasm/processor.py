@@ -766,6 +766,10 @@ class wasm_processor_t(idaapi.processor_t):
             if not (op.type == idaapi.o_imm and op.specval == WASM_GLOBAL):
                 continue
 
+            if op.value not in self.globals:
+                logger.debug('missing global: %d', op.value)
+                continue
+
             global_va = self.globals[op.value]['offset']
             if insn.itype == self.itype_SET_GLOBAL:
                 idc.add_dref(insn.ea, global_va, idc.dr_W)
@@ -915,9 +919,15 @@ class wasm_processor_t(idaapi.processor_t):
                 #     code:0D38    set_global   global_0
                 #                                 ^
                 #                                this thing
-                g = self.globals[op.value]
-                ctx.out_name_expr(op, g['offset'])
-                return True
+                if op.value in self.globals:
+                    g = self.globals[op.value]
+                    ctx.out_name_expr(op, g['offset'])
+                    return True
+                else:
+                    logger.info('missing global at index %d', op.value)
+                    ctx.out_register('$global%d'% (op.value))
+                    return True
+
 
             elif wtype == WASM_FUNC_INDEX:
                 f = self.functions[op.value]
