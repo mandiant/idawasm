@@ -182,9 +182,11 @@ class ShlOperation(BinaryOperation):
         super(ShlOperation, self).__init__('<<', lhs, rhs)
 
 
-class ShrOperation(BinaryOperation):
+class ShruOperation(BinaryOperation):
     def __init__(self, lhs, rhs):
-        super(ShrOperation, self).__init__('>>', lhs, rhs)
+        super(ShruOperation, self).__init__('>>', lhs, rhs)
+
+
 
 
 def reduce(value):
@@ -346,6 +348,15 @@ class Emulator:
         else:
             self.push(ShlOperation(v0, v1))
 
+    def handle_I32_SHR_U(self, insn):
+        v1 = self.pop()
+        v0 = self.pop()
+
+        if isinstance(v0, I32) and isinstance(v1, I32):
+            self.push(I32(v0.value >> v1.value))
+        else:
+            self.push(ShruOperation(v0, v1))
+
     def handle_I32_LOAD8_U(self, insn):
         base = self.pop()
         offset = insn.imm.offset
@@ -421,9 +432,9 @@ class Emulator:
             v3 = I32((value.value & 0xFF000000) >> 24)
         else:
             v0 = AndOperation(value, I32(0xFF))
-            v1 = ShrOperation(AndOperation(value, I32(0xFF)), I32(8))
-            v2 = ShrOperation(AndOperation(value, I32(0xFF00)), I32(16))
-            v3 = ShrOperation(AndOperation(value, I32(0xFF0000)), I32(24))
+            v1 = ShruOperation(AndOperation(value, I32(0xFF)), I32(8))
+            v2 = ShruOperation(AndOperation(value, I32(0xFF00)), I32(16))
+            v3 = ShruOperation(AndOperation(value, I32(0xFF0000)), I32(24))
 
         if isinstance(addr, I32):
             self.memory[addr.value] = v0
@@ -450,6 +461,7 @@ class Emulator:
             wasm.opcodes.OP_I32_SUB: self.handle_I32_SUB,
             wasm.opcodes.OP_I32_AND: self.handle_I32_AND,
             wasm.opcodes.OP_I32_SHL: self.handle_I32_SHL,
+            wasm.opcodes.OP_I32_SHR_U: self.handle_I32_SHR_U,
             wasm.opcodes.OP_I32_LOAD: self.handle_I32_LOAD,
             wasm.opcodes.OP_I32_LOAD8_U: self.handle_I32_LOAD8_U,
             wasm.opcodes.OP_I32_STORE: self.handle_I32_STORE,
