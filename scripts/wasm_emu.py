@@ -187,6 +187,9 @@ class ShruOperation(BinaryOperation):
         super(ShruOperation, self).__init__('>>', lhs, rhs)
 
 
+class XorOperation(BinaryOperation):
+    def __init__(self, lhs, rhs):
+        super(XorOperation, self).__init__('^', lhs, rhs)
 
 
 def reduce(value):
@@ -357,6 +360,15 @@ class Emulator:
         else:
             self.push(ShruOperation(v0, v1))
 
+    def handle_I32_XOR(self, insn):
+        v1 = self.pop()
+        v0 = self.pop()
+
+        if isinstance(v0, I32) and isinstance(v1, I32):
+            self.push(I32(v0.value ^ v1.value))
+        else:
+            self.push(XorOperation(v0, v1))
+
     def handle_I32_LOAD8_U(self, insn):
         base = self.pop()
         offset = insn.imm.offset
@@ -462,6 +474,7 @@ class Emulator:
             wasm.opcodes.OP_I32_AND: self.handle_I32_AND,
             wasm.opcodes.OP_I32_SHL: self.handle_I32_SHL,
             wasm.opcodes.OP_I32_SHR_U: self.handle_I32_SHR_U,
+            wasm.opcodes.OP_I32_XOR: self.handle_I32_XOR,
             wasm.opcodes.OP_I32_LOAD: self.handle_I32_LOAD,
             wasm.opcodes.OP_I32_LOAD8_U: self.handle_I32_LOAD8_U,
             wasm.opcodes.OP_I32_STORE: self.handle_I32_STORE,
